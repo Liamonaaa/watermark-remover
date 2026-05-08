@@ -33,6 +33,7 @@
       <button class="tab active" data-tool="brush">🖌️ מברשת</button>
       <button class="tab" data-tool="wand">✨ Magic Wand</button>
       <button class="tab" data-tool="auto">🎯 זיהוי אוטומטי</button>
+      <button class="tab" data-tool="stamp">🎨 שיבוט (Clone Stamp)</button>
     </div>
 
     <div class="tool-panel" id="panel-brush">
@@ -56,6 +57,27 @@
           <input type="checkbox" id="wandContiguous" checked>
           רק אזור מחובר
         </label>
+      </div>
+    </div>
+
+    <div class="tool-panel hidden" id="panel-stamp">
+      <p class="instructions">
+        1. לחץ "סמן מקור" ולחץ על אזור נקי בתמונה.
+        2. צייר על הטשטוש — הפיקסלים מהמקור יועתקו לשם.
+      </p>
+      <div class="tool-group">
+        <button id="setSourceBtn" class="btn btn-secondary">סמן מקור</button>
+        <span id="sourceStatus" class="source-status">לא נבחר מקור</span>
+      </div>
+      <div class="tool-group">
+        <label>גודל מברשת</label>
+        <input type="range" id="stampSize" min="5" max="120" value="30">
+        <span id="stampSizeVal">30</span>
+      </div>
+      <div class="tool-group">
+        <label>קשיות</label>
+        <input type="range" id="stampHardness" min="0" max="100" value="80">
+        <span id="stampHardnessVal">80</span>
       </div>
     </div>
 

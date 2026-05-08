@@ -26,6 +26,12 @@ const els = {
   resetBtn: document.getElementById("resetBtn"),
   status: document.getElementById("status"),
   tabs: document.querySelectorAll(".tab"),
+  setSourceBtn: document.getElementById("setSourceBtn"),
+  sourceStatus: document.getElementById("sourceStatus"),
+  stampSize: document.getElementById("stampSize"),
+  stampSizeVal: document.getElementById("stampSizeVal"),
+  stampHardness: document.getElementById("stampHardness"),
+  stampHardnessVal: document.getElementById("stampHardnessVal"),
 };
 
 const imgCtx = els.imgCanvas.getContext("2d", { willReadFrequently: true });
@@ -62,6 +68,76 @@ bindRange(els.wandTolerance, els.wandToleranceVal);
 bindRange(els.autoTolerance, els.autoToleranceVal);
 bindRange(els.maskDilate, els.maskDilateVal);
 bindRange(els.inpaintRadius, els.inpaintRadiusVal);
+bindRange(els.stampSize, els.stampSizeVal);
+bindRange(els.stampHardness, els.stampHardnessVal);
+
+let stampSource = null;
+let stampPickMode = false;
+let stampClickPoint = null;
+let imageHistory = [];
+
+els.setSourceBtn.addEventListener("click", () => {
+  stampPickMode = true;
+  els.sourceStatus.textContent = "לחץ על נקודה בתמונה...";
+  els.sourceStatus.style.color = "var(--primary)";
+  els.maskCanvas.style.cursor = "copy";
+});
+
+function pushImageHistory() {
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+  imageHistory.push(imgCtx.getImageData(0, 0, w, h));
+  if (imageHistory.length > 10) imageHistory.shift();
+}
+
+function applyStamp(targetX, targetY) {
+  if (!stampSource || !stampClickPoint) return;
+  const size = parseInt(els.stampSize.value, 10);
+  const hardness = parseInt(els.stampHardness.value, 10) / 100;
+  const radius = size / 2;
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+
+  const offsetX = stampSource.x - stampClickPoint.x;
+  const offsetY = stampSource.y - stampClickPoint.y;
+  const srcX = Math.round(targetX + offsetX);
+  const srcY = Math.round(targetY + offsetY);
+
+  const x0 = Math.max(0, Math.round(targetX - radius));
+  const y0 = Math.max(0, Math.round(targetY - radius));
+  const x1 = Math.min(w, Math.round(targetX + radius));
+  const y1 = Math.min(h, Math.round(targetY + radius));
+  if (x1 <= x0 || y1 <= y0) return;
+
+  const tw = x1 - x0;
+  const th = y1 - y0;
+
+  const sx0 = srcX - (Math.round(targetX) - x0);
+  const sy0 = srcY - (Math.round(targetY) - y0);
+  if (sx0 < 0 || sy0 < 0 || sx0 + tw > w || sy0 + th > h) return;
+
+  const target = imgCtx.getImageData(x0, y0, tw, th);
+  const source = imgCtx.getImageData(sx0, sy0, tw, th);
+  const td = target.data;
+  const sd = source.data;
+
+  for (let yy = 0; yy < th; yy++) {
+    for (let xx = 0; xx < tw; xx++) {
+      const dx = (x0 + xx) - targetX;
+      const dy = (y0 + yy) - targetY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > radius) continue;
+      const t = dist / radius;
+      const falloff = t < hardness ? 1 : Math.pow(1 - (t - hardness) / (1 - hardness + 0.0001), 2);
+      const alpha = Math.max(0, Math.min(1, falloff));
+      const i = (yy * tw + xx) * 4;
+      td[i]     = sd[i]     * alpha + td[i]     * (1 - alpha);
+      td[i + 1] = sd[i + 1] * alpha + td[i + 1] * (1 - alpha);
+      td[i + 2] = sd[i + 2] * alpha + td[i + 2] * (1 - alpha);
+    }
+  }
+  imgCtx.putImageData(target, x0, y0);
+}
 
 els.tabs.forEach(tab => {
   tab.addEventListener("click", () => {
@@ -70,7 +146,9 @@ els.tabs.forEach(tab => {
     currentTool = tab.dataset.tool;
     document.querySelectorAll(".tool-panel").forEach(p => p.classList.add("hidden"));
     document.getElementById(`panel-${currentTool}`).classList.remove("hidden");
-    els.maskCanvas.style.cursor = currentTool === "brush" ? "crosshair" : "pointer";
+    if (currentTool === "brush") els.maskCanvas.style.cursor = "crosshair";
+    else if (currentTool === "stamp") els.maskCanvas.style.cursor = stampSource ? "crosshair" : "pointer";
+    else els.maskCanvas.style.cursor = "pointer";
   });
 });
 
@@ -161,15 +239,43 @@ function startDraw(e) {
   } else if (currentTool === "wand") {
     pushHistory();
     magicWand(p.x, p.y);
+  } else if (currentTool === "stamp") {
+    if (stampPickMode) {
+      stampSource = { x: p.x, y: p.y };
+      stampPickMode = false;
+      els.sourceStatus.textContent = `מקור: (${p.x}, ${p.y})`;
+      els.sourceStatus.style.color = "var(--success)";
+      els.maskCanvas.style.cursor = "crosshair";
+      return;
+    }
+    if (!stampSource) {
+      setStatus("בחר מקור תחילה", "error");
+      return;
+    }
+    drawing = true;
+    pushImageHistory();
+    stampClickPoint = { x: p.x, y: p.y };
+    lastPoint = p;
+    applyStamp(p.x, p.y);
   }
 }
 
 function drawMove(e) {
-  if (!drawing || currentTool !== "brush") return;
+  if (!drawing) return;
   e.preventDefault();
   const p = getCanvasPoint(e);
-  drawLine(lastPoint, p);
-  lastPoint = p;
+  if (currentTool === "brush") {
+    drawLine(lastPoint, p);
+    lastPoint = p;
+  } else if (currentTool === "stamp") {
+    const steps = Math.max(1, Math.round(Math.hypot(p.x - lastPoint.x, p.y - lastPoint.y) / 2));
+    for (let i = 1; i <= steps; i++) {
+      const ix = lastPoint.x + (p.x - lastPoint.x) * (i / steps);
+      const iy = lastPoint.y + (p.y - lastPoint.y) * (i / steps);
+      applyStamp(ix, iy);
+    }
+    lastPoint = p;
+  }
 }
 
 function endDraw() {
@@ -210,6 +316,12 @@ els.clearMaskBtn.addEventListener("click", () => {
 });
 
 els.undoBtn.addEventListener("click", () => {
+  if (currentTool === "stamp") {
+    if (imageHistory.length === 0) return;
+    const prev = imageHistory.pop();
+    imgCtx.putImageData(prev, 0, 0);
+    return;
+  }
   if (maskHistory.length === 0) return;
   const prev = maskHistory.pop();
   maskCtx.putImageData(prev, 0, 0);
@@ -297,6 +409,11 @@ els.resetBtn.addEventListener("click", () => {
   imgCtx.clearRect(0, 0, els.imgCanvas.width, els.imgCanvas.height);
   maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
   maskHistory = [];
+  imageHistory = [];
+  stampSource = null;
+  stampPickMode = false;
+  els.sourceStatus.textContent = "לא נבחר מקור";
+  els.sourceStatus.style.color = "";
   originalImageData = null;
   clearStatus();
 });
@@ -348,6 +465,7 @@ async function processInpaint() {
     cv.inpaint(src, mask, dst, radius, flag);
 
     cv.cvtColor(dst, dst, cv.COLOR_RGB2RGBA);
+    pushImageHistory();
     cv.imshow(els.imgCanvas, dst);
 
     maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);

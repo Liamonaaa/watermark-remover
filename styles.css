@@ -151,6 +151,12 @@ input[type="checkbox"] {
   margin-left: 0.4rem;
 }
 
+.source-status {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
 .tool-group label input[type="checkbox"] {
   vertical-align: middle;
 }
