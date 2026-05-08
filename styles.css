@@ -80,6 +80,122 @@ label {
 .drop-content p { color: var(--text); }
 .drop-content .small { color: var(--text-dim); font-size: 0.85rem; margin-top: 0.25rem; }
 
+.ai-panel {
+  background: linear-gradient(135deg, rgba(124,92,255,0.08), rgba(92,255,208,0.05));
+  border: 1px solid rgba(124,92,255,0.3);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.ai-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.ai-header h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 600;
+}
+
+.btn-link:hover { text-decoration: underline; }
+
+.ai-desc {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  margin-bottom: 0.75rem;
+}
+
+.ai-desc a { color: var(--primary); text-decoration: none; }
+.ai-desc a:hover { text-decoration: underline; }
+
+.key-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.key-row input {
+  flex: 1;
+  padding: 0.6rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.key-row input:focus { outline: none; border-color: var(--primary); }
+
+.ai-prompt-row { margin-bottom: 0.75rem; }
+
+.ai-prompt-row textarea {
+  width: 100%;
+  padding: 0.6rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 50px;
+}
+
+.ai-prompt-row textarea:focus { outline: none; border-color: var(--primary); }
+
+.btn-ai {
+  width: 100%;
+  background: linear-gradient(135deg, var(--primary), #5cffd0);
+  font-size: 1rem;
+  padding: 0.85rem;
+}
+
+.btn-ai:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--primary-hover), #4ad6b0);
+}
+
+.divider {
+  text-align: center;
+  margin: 1.25rem 0;
+  position: relative;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 40%;
+  height: 1px;
+  background: var(--border);
+}
+
+.divider::before { right: 0; }
+.divider::after { left: 0; }
+
+.divider span {
+  background: var(--bg);
+  padding: 0 1rem;
+  position: relative;
+}
+
 .workflow {
   background: var(--surface-2);
   border-radius: 8px;

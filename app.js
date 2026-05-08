@@ -18,7 +18,19 @@ const els = {
   downloadBtn: document.getElementById("downloadBtn"),
   resetBtn: document.getElementById("resetBtn"),
   status: document.getElementById("status"),
+  apiKey: document.getElementById("apiKey"),
+  saveKeyBtn: document.getElementById("saveKeyBtn"),
+  aiProcessBtn: document.getElementById("aiProcessBtn"),
+  aiPrompt: document.getElementById("aiPrompt"),
+  toggleAiBtn: document.getElementById("toggleAiBtn"),
+  aiBody: document.getElementById("aiBody"),
 };
+
+const GEMINI_MODEL = "gemini-2.5-flash-image-preview";
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+const savedKey = localStorage.getItem("gemini_api_key");
+if (savedKey) els.apiKey.value = savedKey;
 
 const imgCtx = els.imgCanvas.getContext("2d", { willReadFrequently: true });
 const maskCtx = els.maskCanvas.getContext("2d", { willReadFrequently: true });
@@ -361,6 +373,110 @@ els.resetBtn.addEventListener("click", () => {
   els.sourceStatus.style.color = "";
   clearStatus();
 });
+
+els.saveKeyBtn.addEventListener("click", () => {
+  const k = els.apiKey.value.trim();
+  if (!k) {
+    setStatus("הזן מפתח", "error");
+    return;
+  }
+  localStorage.setItem("gemini_api_key", k);
+  setStatus("מפתח נשמר", "success");
+  setTimeout(() => clearStatus(), 1500);
+});
+
+els.toggleAiBtn.addEventListener("click", () => {
+  els.aiBody.classList.toggle("hidden");
+});
+
+els.aiProcessBtn.addEventListener("click", processWithAI);
+
+async function processWithAI() {
+  const apiKey = els.apiKey.value.trim();
+  if (!apiKey) {
+    setStatus("הזן מפתח Gemini API", "error");
+    return;
+  }
+
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+  if (w === 0 || h === 0) {
+    setStatus("טען תמונה תחילה", "error");
+    return;
+  }
+
+  els.aiProcessBtn.disabled = true;
+  setStatus(`Gemini מעבד תמונה<span class="spinner"></span>`, "loading");
+
+  try {
+    const dataUrl = els.imgCanvas.toDataURL("image/png");
+    const base64 = dataUrl.split(",")[1];
+    const userExtra = els.aiPrompt.value.trim();
+
+    const instruction = userExtra
+      ? `Remove all watermarks, logos, and text overlays from this image. ${userExtra}. Preserve the original content, composition, colors, and details. Inpaint the watermarked areas naturally to match the surrounding content.`
+      : "Remove all watermarks, logos, and text overlays from this image. Preserve the original content, composition, colors, and details. Inpaint the watermarked areas naturally to match the surrounding content.";
+
+    const body = {
+      contents: [{
+        parts: [
+          { text: instruction },
+          { inline_data: { mime_type: "image/png", data: base64 } }
+        ]
+      }],
+      generationConfig: { responseModalities: ["IMAGE"] }
+    };
+
+    const res = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      let errMsg = `שגיאת API ${res.status}`;
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.error?.message) errMsg += `: ${errJson.error.message}`;
+      } catch {}
+      throw new Error(errMsg);
+    }
+
+    const data = await res.json();
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const imagePart = parts.find(p => p.inline_data || p.inlineData);
+
+    if (!imagePart) {
+      const textPart = parts.find(p => p.text);
+      throw new Error(textPart?.text || "המודל לא החזיר תמונה");
+    }
+
+    const imgData = imagePart.inline_data || imagePart.inlineData;
+    const outMime = imgData.mime_type || imgData.mimeType || "image/png";
+    const outDataUrl = `data:${outMime};base64,${imgData.data}`;
+
+    const newImg = new Image();
+    newImg.onload = () => {
+      pushImageHistory();
+      els.imgCanvas.width = newImg.naturalWidth;
+      els.imgCanvas.height = newImg.naturalHeight;
+      els.maskCanvas.width = newImg.naturalWidth;
+      els.maskCanvas.height = newImg.naturalHeight;
+      imgCtx.drawImage(newImg, 0, 0);
+      maskCtx.clearRect(0, 0, newImg.naturalWidth, newImg.naturalHeight);
+      els.downloadBtn.classList.remove("hidden");
+      setStatus("AI סיים. ניתן לחדד עם Magic Wand", "success");
+    };
+    newImg.onerror = () => setStatus("שגיאה בטעינת תוצאה", "error");
+    newImg.src = outDataUrl;
+  } catch (err) {
+    console.error(err);
+    setStatus(err.message || "שגיאה", "error");
+  } finally {
+    els.aiProcessBtn.disabled = false;
+  }
+}
 
 els.downloadBtn.addEventListener("click", () => {
   els.imgCanvas.toBlob((blob) => {

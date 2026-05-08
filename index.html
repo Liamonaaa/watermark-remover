@@ -29,6 +29,31 @@
   </section>
 
   <section class="editor hidden" id="editorSection">
+    <div class="ai-panel">
+      <div class="ai-header">
+        <h2>🤖 מצב AI (Gemini)</h2>
+        <button id="toggleAiBtn" class="btn-link">הצג/הסתר</button>
+      </div>
+      <div class="ai-body" id="aiBody">
+        <p class="ai-desc">
+          הסרה אוטומטית עם Google Gemini 2.5 Flash Image. חינם עד 500 בקשות ביום.
+          קבל מפתח ב-<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
+        </p>
+        <div class="key-row">
+          <input type="password" id="apiKey" placeholder="AIza..." autocomplete="off">
+          <button id="saveKeyBtn" class="btn btn-secondary">שמור</button>
+        </div>
+        <div class="ai-prompt-row">
+          <textarea id="aiPrompt" rows="2" placeholder="הוראות נוספות (אופציונלי): למשל 'הסר רק את הלוגו בפינה'"></textarea>
+        </div>
+        <button id="aiProcessBtn" class="btn btn-primary btn-ai">🤖 הסר סימני מים עם AI</button>
+      </div>
+    </div>
+
+    <div class="divider">
+      <span>או הסרה ידנית</span>
+    </div>
+
     <div class="workflow">
       <div class="step">
         <span class="step-num">1</span>
