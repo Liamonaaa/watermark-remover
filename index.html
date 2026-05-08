@@ -31,37 +31,39 @@
   <section class="editor hidden" id="editorSection">
     <div class="ai-panel">
       <div class="ai-header">
-        <h2>🤖 מצב AI (Gemini)</h2>
-        <button id="toggleAiBtn" class="btn-link">הצג/הסתר</button>
+        <h2>🧠 מודל AI מקומי (LaMa)</h2>
+        <span id="aiStatus" class="ai-status">לא נטען</span>
       </div>
-      <div class="ai-body" id="aiBody">
-        <p class="ai-desc">
-          הסרה אוטומטית עם Google Gemini 2.5 Flash Image. חינם עד 500 בקשות ביום.
-          קבל מפתח ב-<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
-        </p>
-        <div class="key-row">
-          <input type="password" id="apiKey" placeholder="AIza..." autocomplete="off">
-          <button id="saveKeyBtn" class="btn btn-secondary">שמור</button>
-        </div>
-        <div class="ai-prompt-row">
-          <textarea id="aiPrompt" rows="2" placeholder="הוראות נוספות (אופציונלי): למשל 'הסר רק את הלוגו בפינה'"></textarea>
-        </div>
-        <button id="aiProcessBtn" class="btn btn-primary btn-ai">🤖 הסר סימני מים עם AI</button>
+      <p class="ai-desc">
+        מודל LaMa רץ בדפדפן שלך — בלי שרת, בלי API key, בלי מגבלות.
+        הורדה חד-פעמית ~200MB (נשמר ב-cache).
+      </p>
+      <div class="ai-actions">
+        <button id="loadLamaBtn" class="btn btn-primary btn-ai">⬇️ טען מודל AI</button>
+        <label class="ai-toggle">
+          <input type="checkbox" id="useLamaToggle" disabled>
+          השתמש ב-AI (במקום Clone Stamp)
+        </label>
+      </div>
+      <div id="loadProgress" class="load-progress hidden">
+        <div class="progress-bar"><div id="progressFill"></div></div>
+        <span id="progressText">0%</span>
       </div>
     </div>
 
     <div class="divider">
-      <span>או הסרה ידנית</span>
+      <span>הסרה</span>
     </div>
 
     <div class="workflow">
-      <div class="step">
+      <div class="step" id="sourceStep">
         <span class="step-num">1</span>
         <button id="setSourceBtn" class="btn btn-secondary">סמן אזור מקור נקי</button>
         <span id="sourceStatus" class="source-status">לא נבחר מקור</span>
+        <span class="step-hint">(נדרש למצב Clone Stamp בלבד)</span>
       </div>
       <div class="step">
-        <span class="step-num">2</span>
+        <span class="step-num" id="mainStepNum">2</span>
         <span class="step-text">לחץ על סימן המים בתמונה — האתר יזהה ויסיר אותו אוטומטית</span>
       </div>
     </div>

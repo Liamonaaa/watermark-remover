@@ -88,6 +88,76 @@ label {
   margin-bottom: 1.25rem;
 }
 
+.ai-status {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 0.25rem 0.6rem;
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+
+.ai-status.loading { color: var(--primary); }
+.ai-status.ready { color: var(--success); }
+.ai-status.error { color: var(--danger); }
+
+.ai-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.ai-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-toggle input:disabled + * { opacity: 0.4; }
+.ai-toggle:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
+
+.load-progress {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#progressFill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--primary), #5cffd0);
+  transition: width 0.2s;
+}
+
+#progressText {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  font-weight: 600;
+  min-width: 48px;
+  text-align: left;
+}
+
+.step-hint {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 .ai-header {
   display: flex;
   justify-content: space-between;

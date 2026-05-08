@@ -18,19 +18,13 @@ const els = {
   downloadBtn: document.getElementById("downloadBtn"),
   resetBtn: document.getElementById("resetBtn"),
   status: document.getElementById("status"),
-  apiKey: document.getElementById("apiKey"),
-  saveKeyBtn: document.getElementById("saveKeyBtn"),
-  aiProcessBtn: document.getElementById("aiProcessBtn"),
-  aiPrompt: document.getElementById("aiPrompt"),
-  toggleAiBtn: document.getElementById("toggleAiBtn"),
-  aiBody: document.getElementById("aiBody"),
+  loadLamaBtn: document.getElementById("loadLamaBtn"),
+  useLamaToggle: document.getElementById("useLamaToggle"),
+  aiStatus: document.getElementById("aiStatus"),
+  loadProgress: document.getElementById("loadProgress"),
+  progressFill: document.getElementById("progressFill"),
+  progressText: document.getElementById("progressText"),
 };
-
-const GEMINI_MODEL = "gemini-2.5-flash-image";
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-
-const savedKey = localStorage.getItem("gemini_api_key");
-if (savedKey) els.apiKey.value = savedKey;
 
 const imgCtx = els.imgCanvas.getContext("2d", { willReadFrequently: true });
 const maskCtx = els.maskCanvas.getContext("2d", { willReadFrequently: true });
@@ -40,6 +34,13 @@ let stampPickMode = false;
 let imageHistory = [];
 const MASK_COLOR = [255, 51, 102];
 const HISTORY_LIMIT = 15;
+
+let lamaSession = null;
+let lamaLoading = false;
+const LAMA_MODEL_URL = "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx";
+const ORT_VERSION = "1.18.0";
+const ORT_SCRIPT = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/ort.min.js`;
+const ORT_WASM_PATH = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
 
 const bindRange = (input, label) => {
   input.addEventListener("input", () => { label.textContent = input.value; });
@@ -291,7 +292,164 @@ function applyCloneFill(mask, alpha, clickPoint) {
   return painted;
 }
 
-els.maskCanvas.addEventListener("click", (e) => {
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error(`failed to load ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
+async function fetchModelWithProgress(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} בהורדת המודל`);
+  const total = parseInt(res.headers.get("content-length") || "0", 10);
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (total > 0) {
+      const pct = Math.round((received / total) * 100);
+      els.progressFill.style.width = `${pct}%`;
+      els.progressText.textContent = `${pct}% (${(received / 1048576).toFixed(1)}MB)`;
+    } else {
+      els.progressText.textContent = `${(received / 1048576).toFixed(1)}MB`;
+    }
+  }
+  const buf = new Uint8Array(received);
+  let pos = 0;
+  for (const c of chunks) { buf.set(c, pos); pos += c.length; }
+  return buf.buffer;
+}
+
+els.loadLamaBtn.addEventListener("click", loadLama);
+
+async function loadLama() {
+  if (lamaSession || lamaLoading) return;
+  lamaLoading = true;
+  els.loadLamaBtn.disabled = true;
+  els.aiStatus.textContent = "טוען...";
+  els.aiStatus.className = "ai-status loading";
+  els.loadProgress.classList.remove("hidden");
+  els.progressText.textContent = "טוען ONNX runtime...";
+
+  try {
+    await loadScript(ORT_SCRIPT);
+    if (!window.ort) throw new Error("ONNX runtime לא נטען");
+    ort.env.wasm.wasmPaths = ORT_WASM_PATH;
+
+    els.progressText.textContent = "מוריד מודל LaMa...";
+    const modelBuf = await fetchModelWithProgress(LAMA_MODEL_URL);
+
+    els.progressText.textContent = "מאתחל מודל...";
+    let providers = ["wasm"];
+    try {
+      if (navigator.gpu) providers = ["webgpu", "wasm"];
+    } catch {}
+
+    lamaSession = await ort.InferenceSession.create(modelBuf, {
+      executionProviders: providers,
+      graphOptimizationLevel: "all"
+    });
+
+    els.aiStatus.textContent = "מוכן ✓";
+    els.aiStatus.className = "ai-status ready";
+    els.useLamaToggle.disabled = false;
+    els.useLamaToggle.checked = true;
+    els.loadLamaBtn.textContent = "✓ מודל נטען";
+    els.loadProgress.classList.add("hidden");
+    setStatus("מודל LaMa מוכן. לחיצה על סימן מים = AI יסיר אותו", "success");
+  } catch (err) {
+    console.error(err);
+    els.aiStatus.textContent = "כשל בטעינה";
+    els.aiStatus.className = "ai-status error";
+    els.loadLamaBtn.disabled = false;
+    setStatus(`שגיאה: ${err.message}`, "error");
+    els.loadProgress.classList.add("hidden");
+  } finally {
+    lamaLoading = false;
+  }
+}
+
+async function inpaintWithLama(maskU8) {
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+
+  const ph = Math.ceil(h / 8) * 8;
+  const pw = Math.ceil(w / 8) * 8;
+
+  const tmpImg = document.createElement("canvas");
+  tmpImg.width = pw;
+  tmpImg.height = ph;
+  const tmpCtx = tmpImg.getContext("2d");
+  tmpCtx.drawImage(els.imgCanvas, 0, 0);
+
+  const padImgData = tmpCtx.getImageData(0, 0, pw, ph).data;
+
+  const imgArr = new Float32Array(3 * pw * ph);
+  const plane = pw * ph;
+  for (let i = 0; i < plane; i++) {
+    imgArr[i] = padImgData[i * 4];
+    imgArr[plane + i] = padImgData[i * 4 + 1];
+    imgArr[2 * plane + i] = padImgData[i * 4 + 2];
+  }
+
+  const maskArr = new Float32Array(plane);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      maskArr[y * pw + x] = maskU8[y * w + x] > 0 ? 1.0 : 0.0;
+    }
+  }
+
+  const imgTensor = new ort.Tensor("float32", imgArr, [1, 3, ph, pw]);
+  const maskTensor = new ort.Tensor("float32", maskArr, [1, 1, ph, pw]);
+
+  const inputNames = lamaSession.inputNames;
+  const feeds = {};
+  feeds[inputNames[0]] = imgTensor;
+  feeds[inputNames[1]] = maskTensor;
+
+  const results = await lamaSession.run(feeds);
+  const outKey = lamaSession.outputNames[0];
+  const out = results[outKey];
+  const outArr = out.data;
+
+  const outImg = imgCtx.createImageData(w, h);
+  const od = outImg.data;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const srcI = y * pw + x;
+      const dstI = (y * w + x) * 4;
+      od[dstI]     = Math.max(0, Math.min(255, outArr[srcI]));
+      od[dstI + 1] = Math.max(0, Math.min(255, outArr[plane + srcI]));
+      od[dstI + 2] = Math.max(0, Math.min(255, outArr[2 * plane + srcI]));
+      od[dstI + 3] = 255;
+    }
+  }
+  return outImg;
+}
+
+function blendInpainted(originalImageData, inpaintedImageData, alpha, w, h) {
+  const od = originalImageData.data;
+  const id = inpaintedImageData.data;
+  for (let i = 0; i < w * h; i++) {
+    const a = alpha[i];
+    if (a <= 0) continue;
+    const di = i * 4;
+    od[di]     = id[di]     * a + od[di]     * (1 - a);
+    od[di + 1] = id[di + 1] * a + od[di + 1] * (1 - a);
+    od[di + 2] = id[di + 2] * a + od[di + 2] * (1 - a);
+  }
+}
+
+els.maskCanvas.addEventListener("click", async (e) => {
   const p = getCanvasPoint(e);
 
   if (stampPickMode) {
@@ -317,8 +475,9 @@ els.maskCanvas.addEventListener("click", (e) => {
     return;
   }
 
-  if (!stampSource) {
-    setStatus("בחר אזור מקור תחילה (שלב 1)", "error");
+  const useLama = els.useLamaToggle.checked && lamaSession;
+  if (!useLama && !stampSource) {
+    setStatus("בחר אזור מקור (שלב 1) או טען מודל AI", "error");
     return;
   }
 
@@ -340,14 +499,31 @@ els.maskCanvas.addEventListener("click", (e) => {
   const alpha = featherMask(mask, w, h, featherAmount);
 
   showMaskPreview(mask, w, h);
+  await new Promise(r => setTimeout(r, 50));
 
-  setTimeout(() => {
+  if (useLama) {
+    setStatus(`AI מעבד<span class="spinner"></span>`, "loading");
+    try {
+      const inpainted = await inpaintWithLama(mask);
+      pushImageHistory();
+      const original = imgCtx.getImageData(0, 0, w, h);
+      blendInpainted(original, inpainted, alpha, w, h);
+      imgCtx.putImageData(original, 0, 0);
+      maskCtx.clearRect(0, 0, w, h);
+      els.downloadBtn.classList.remove("hidden");
+      setStatus(`הוסר עם AI (${count.toLocaleString()} פיקסלים)`, "success");
+    } catch (err) {
+      console.error(err);
+      maskCtx.clearRect(0, 0, w, h);
+      setStatus(`שגיאת AI: ${err.message}`, "error");
+    }
+  } else {
     pushImageHistory();
     const painted = applyCloneFill(mask, alpha, p);
     maskCtx.clearRect(0, 0, w, h);
     els.downloadBtn.classList.remove("hidden");
-    setStatus(`הוסר אזור של ${painted.toLocaleString()} פיקסלים`, "success");
-  }, 120);
+    setStatus(`הוסר עם Clone Stamp (${painted.toLocaleString()} פיקסלים)`, "success");
+  }
 });
 
 els.undoBtn.addEventListener("click", () => {
@@ -373,110 +549,6 @@ els.resetBtn.addEventListener("click", () => {
   els.sourceStatus.style.color = "";
   clearStatus();
 });
-
-els.saveKeyBtn.addEventListener("click", () => {
-  const k = els.apiKey.value.trim();
-  if (!k) {
-    setStatus("הזן מפתח", "error");
-    return;
-  }
-  localStorage.setItem("gemini_api_key", k);
-  setStatus("מפתח נשמר", "success");
-  setTimeout(() => clearStatus(), 1500);
-});
-
-els.toggleAiBtn.addEventListener("click", () => {
-  els.aiBody.classList.toggle("hidden");
-});
-
-els.aiProcessBtn.addEventListener("click", processWithAI);
-
-async function processWithAI() {
-  const apiKey = els.apiKey.value.trim();
-  if (!apiKey) {
-    setStatus("הזן מפתח Gemini API", "error");
-    return;
-  }
-
-  const w = els.imgCanvas.width;
-  const h = els.imgCanvas.height;
-  if (w === 0 || h === 0) {
-    setStatus("טען תמונה תחילה", "error");
-    return;
-  }
-
-  els.aiProcessBtn.disabled = true;
-  setStatus(`Gemini מעבד תמונה<span class="spinner"></span>`, "loading");
-
-  try {
-    const dataUrl = els.imgCanvas.toDataURL("image/png");
-    const base64 = dataUrl.split(",")[1];
-    const userExtra = els.aiPrompt.value.trim();
-
-    const instruction = userExtra
-      ? `Remove all watermarks, logos, and text overlays from this image. ${userExtra}. Preserve the original content, composition, colors, and details. Inpaint the watermarked areas naturally to match the surrounding content.`
-      : "Remove all watermarks, logos, and text overlays from this image. Preserve the original content, composition, colors, and details. Inpaint the watermarked areas naturally to match the surrounding content.";
-
-    const body = {
-      contents: [{
-        parts: [
-          { text: instruction },
-          { inline_data: { mime_type: "image/png", data: base64 } }
-        ]
-      }],
-      generationConfig: { responseModalities: ["IMAGE"] }
-    };
-
-    const res = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      let errMsg = `שגיאת API ${res.status}`;
-      try {
-        const errJson = JSON.parse(errText);
-        if (errJson.error?.message) errMsg += `: ${errJson.error.message}`;
-      } catch {}
-      throw new Error(errMsg);
-    }
-
-    const data = await res.json();
-    const parts = data.candidates?.[0]?.content?.parts || [];
-    const imagePart = parts.find(p => p.inline_data || p.inlineData);
-
-    if (!imagePart) {
-      const textPart = parts.find(p => p.text);
-      throw new Error(textPart?.text || "המודל לא החזיר תמונה");
-    }
-
-    const imgData = imagePart.inline_data || imagePart.inlineData;
-    const outMime = imgData.mime_type || imgData.mimeType || "image/png";
-    const outDataUrl = `data:${outMime};base64,${imgData.data}`;
-
-    const newImg = new Image();
-    newImg.onload = () => {
-      pushImageHistory();
-      els.imgCanvas.width = newImg.naturalWidth;
-      els.imgCanvas.height = newImg.naturalHeight;
-      els.maskCanvas.width = newImg.naturalWidth;
-      els.maskCanvas.height = newImg.naturalHeight;
-      imgCtx.drawImage(newImg, 0, 0);
-      maskCtx.clearRect(0, 0, newImg.naturalWidth, newImg.naturalHeight);
-      els.downloadBtn.classList.remove("hidden");
-      setStatus("AI סיים. ניתן לחדד עם Magic Wand", "success");
-    };
-    newImg.onerror = () => setStatus("שגיאה בטעינת תוצאה", "error");
-    newImg.src = outDataUrl;
-  } catch (err) {
-    console.error(err);
-    setStatus(err.message || "שגיאה", "error");
-  } finally {
-    els.aiProcessBtn.disabled = false;
-  }
-}
 
 els.downloadBtn.addEventListener("click", () => {
   els.imgCanvas.toBlob((blob) => {
