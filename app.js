@@ -5,8 +5,6 @@ const els = {
   fileInput: document.getElementById("fileInput"),
   imgCanvas: document.getElementById("imgCanvas"),
   maskCanvas: document.getElementById("maskCanvas"),
-  setSourceBtn: document.getElementById("setSourceBtn"),
-  sourceStatus: document.getElementById("sourceStatus"),
   wandTolerance: document.getElementById("wandTolerance"),
   wandToleranceVal: document.getElementById("wandToleranceVal"),
   wandContiguous: document.getElementById("wandContiguous"),
@@ -19,7 +17,6 @@ const els = {
   resetBtn: document.getElementById("resetBtn"),
   status: document.getElementById("status"),
   loadLamaBtn: document.getElementById("loadLamaBtn"),
-  useLamaToggle: document.getElementById("useLamaToggle"),
   aiStatus: document.getElementById("aiStatus"),
   loadProgress: document.getElementById("loadProgress"),
   progressFill: document.getElementById("progressFill"),
@@ -29,8 +26,6 @@ const els = {
 const imgCtx = els.imgCanvas.getContext("2d", { willReadFrequently: true });
 const maskCtx = els.maskCanvas.getContext("2d", { willReadFrequently: true });
 
-let stampSource = null;
-let stampPickMode = false;
 let imageHistory = [];
 const MASK_COLOR = [255, 51, 102];
 const HISTORY_LIMIT = 15;
@@ -103,10 +98,6 @@ function setupCanvas(img) {
   imgCtx.drawImage(img, 0, 0, w, h);
   maskCtx.clearRect(0, 0, w, h);
   imageHistory = [];
-  stampSource = null;
-  stampPickMode = false;
-  els.sourceStatus.textContent = "לא נבחר מקור";
-  els.sourceStatus.style.color = "";
   els.maskCanvas.style.cursor = "pointer";
   els.downloadBtn.classList.add("hidden");
 }
@@ -129,13 +120,6 @@ function pushImageHistory() {
   imageHistory.push(imgCtx.getImageData(0, 0, w, h));
   if (imageHistory.length > HISTORY_LIMIT) imageHistory.shift();
 }
-
-els.setSourceBtn.addEventListener("click", () => {
-  stampPickMode = true;
-  els.sourceStatus.textContent = "לחץ על אזור נקי בתמונה...";
-  els.sourceStatus.style.color = "var(--primary)";
-  els.maskCanvas.style.cursor = "copy";
-});
 
 function colorDistance(r1, g1, b1, r2, g2, b2) {
   const dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
@@ -261,37 +245,6 @@ function showMaskPreview(mask, w, h) {
   maskCtx.putImageData(out, 0, 0);
 }
 
-function applyCloneFill(mask, alpha, clickPoint) {
-  const w = els.imgCanvas.width;
-  const h = els.imgCanvas.height;
-  const offsetX = stampSource.x - clickPoint.x;
-  const offsetY = stampSource.y - clickPoint.y;
-
-  const imgData = imgCtx.getImageData(0, 0, w, h);
-  const d = imgData.data;
-  const srcCopy = new Uint8ClampedArray(d);
-
-  let painted = 0;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      const a = alpha[i];
-      if (a <= 0) continue;
-      const sx = x + offsetX;
-      const sy = y + offsetY;
-      if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
-      const di = i * 4;
-      const si = (sy * w + sx) * 4;
-      d[di]     = srcCopy[si]     * a + d[di]     * (1 - a);
-      d[di + 1] = srcCopy[si + 1] * a + d[di + 1] * (1 - a);
-      d[di + 2] = srcCopy[si + 2] * a + d[di + 2] * (1 - a);
-      painted++;
-    }
-  }
-  imgCtx.putImageData(imgData, 0, 0);
-  return painted;
-}
-
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) return resolve();
@@ -361,9 +314,8 @@ async function loadLama() {
 
     els.aiStatus.textContent = "מוכן ✓";
     els.aiStatus.className = "ai-status ready";
-    els.useLamaToggle.disabled = false;
-    els.useLamaToggle.checked = true;
     els.loadLamaBtn.textContent = "✓ מודל נטען";
+    els.loadLamaBtn.disabled = true;
     els.loadProgress.classList.add("hidden");
     setStatus("מודל LaMa מוכן. לחיצה על סימן מים = AI יסיר אותו", "success");
   } catch (err) {
@@ -419,9 +371,9 @@ async function inpaintWithLama(maskU8) {
 
   const imgArr = new Float32Array(3 * plane);
   for (let i = 0; i < plane; i++) {
-    imgArr[i] = smallImgData[i * 4];
-    imgArr[plane + i] = smallImgData[i * 4 + 1];
-    imgArr[2 * plane + i] = smallImgData[i * 4 + 2];
+    imgArr[i]             = smallImgData[i * 4]     / 255;
+    imgArr[plane + i]     = smallImgData[i * 4 + 1] / 255;
+    imgArr[2 * plane + i] = smallImgData[i * 4 + 2] / 255;
   }
 
   const maskArr = new Float32Array(plane);
@@ -448,10 +400,15 @@ async function inpaintWithLama(maskU8) {
   const outSmallCtx = outSmall.getContext("2d");
   const outSmallImg = outSmallCtx.createImageData(S, S);
   const osd = outSmallImg.data;
+  let maxV = 0;
+  for (let i = 0; i < outArr.length; i++) {
+    if (outArr[i] > maxV) maxV = outArr[i];
+  }
+  const scale = maxV <= 1.5 ? 255 : 1;
   for (let i = 0; i < plane; i++) {
-    osd[i * 4]     = Math.max(0, Math.min(255, outArr[i]));
-    osd[i * 4 + 1] = Math.max(0, Math.min(255, outArr[plane + i]));
-    osd[i * 4 + 2] = Math.max(0, Math.min(255, outArr[2 * plane + i]));
+    osd[i * 4]     = Math.max(0, Math.min(255, outArr[i]                * scale));
+    osd[i * 4 + 1] = Math.max(0, Math.min(255, outArr[plane + i]        * scale));
+    osd[i * 4 + 2] = Math.max(0, Math.min(255, outArr[2 * plane + i]    * scale));
     osd[i * 4 + 3] = 255;
   }
   outSmallCtx.putImageData(outSmallImg, 0, 0);
@@ -481,37 +438,12 @@ function blendInpainted(originalImageData, inpaintedImageData, alpha, w, h) {
 }
 
 els.maskCanvas.addEventListener("click", async (e) => {
+  if (!lamaSession) {
+    setStatus("טען את מודל ה-AI תחילה", "error");
+    return;
+  }
+
   const p = getCanvasPoint(e);
-
-  if (stampPickMode) {
-    stampSource = { x: p.x, y: p.y };
-    stampPickMode = false;
-    els.sourceStatus.textContent = `מקור: (${p.x}, ${p.y})`;
-    els.sourceStatus.style.color = "var(--success)";
-    els.maskCanvas.style.cursor = "pointer";
-
-    const w = els.imgCanvas.width;
-    const h = els.imgCanvas.height;
-    maskCtx.clearRect(0, 0, w, h);
-    maskCtx.fillStyle = "rgba(74, 222, 128, 0.9)";
-    maskCtx.beginPath();
-    maskCtx.arc(p.x, p.y, 12, 0, Math.PI * 2);
-    maskCtx.fill();
-    maskCtx.strokeStyle = "white";
-    maskCtx.lineWidth = 2;
-    maskCtx.stroke();
-    setTimeout(() => {
-      maskCtx.clearRect(0, 0, w, h);
-    }, 1500);
-    return;
-  }
-
-  const useLama = els.useLamaToggle.checked && lamaSession;
-  if (!useLama && !stampSource) {
-    setStatus("בחר אזור מקור (שלב 1) או טען מודל AI", "error");
-    return;
-  }
-
   const w = els.imgCanvas.width;
   const h = els.imgCanvas.height;
 
@@ -532,28 +464,20 @@ els.maskCanvas.addEventListener("click", async (e) => {
   showMaskPreview(mask, w, h);
   await new Promise(r => setTimeout(r, 50));
 
-  if (useLama) {
-    setStatus(`AI מעבד<span class="spinner"></span>`, "loading");
-    try {
-      const inpainted = await inpaintWithLama(mask);
-      pushImageHistory();
-      const original = imgCtx.getImageData(0, 0, w, h);
-      blendInpainted(original, inpainted, alpha, w, h);
-      imgCtx.putImageData(original, 0, 0);
-      maskCtx.clearRect(0, 0, w, h);
-      els.downloadBtn.classList.remove("hidden");
-      setStatus(`הוסר עם AI (${count.toLocaleString()} פיקסלים)`, "success");
-    } catch (err) {
-      console.error(err);
-      maskCtx.clearRect(0, 0, w, h);
-      setStatus(`שגיאת AI: ${err.message}`, "error");
-    }
-  } else {
+  setStatus(`AI מעבד<span class="spinner"></span>`, "loading");
+  try {
+    const inpainted = await inpaintWithLama(mask);
     pushImageHistory();
-    const painted = applyCloneFill(mask, alpha, p);
+    const original = imgCtx.getImageData(0, 0, w, h);
+    blendInpainted(original, inpainted, alpha, w, h);
+    imgCtx.putImageData(original, 0, 0);
     maskCtx.clearRect(0, 0, w, h);
     els.downloadBtn.classList.remove("hidden");
-    setStatus(`הוסר עם Clone Stamp (${painted.toLocaleString()} פיקסלים)`, "success");
+    setStatus(`הוסר ${count.toLocaleString()} פיקסלים`, "success");
+  } catch (err) {
+    console.error(err);
+    maskCtx.clearRect(0, 0, w, h);
+    setStatus(`שגיאת AI: ${err.message}`, "error");
   }
 });
 
@@ -574,10 +498,6 @@ els.resetBtn.addEventListener("click", () => {
   imgCtx.clearRect(0, 0, els.imgCanvas.width, els.imgCanvas.height);
   maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
   imageHistory = [];
-  stampSource = null;
-  stampPickMode = false;
-  els.sourceStatus.textContent = "לא נבחר מקור";
-  els.sourceStatus.style.color = "";
   clearStatus();
 });
 
