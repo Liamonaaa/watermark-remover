@@ -378,38 +378,59 @@ async function loadLama() {
   }
 }
 
+const LAMA_SIZE = 512;
+
 async function inpaintWithLama(maskU8) {
   const w = els.imgCanvas.width;
   const h = els.imgCanvas.height;
+  const S = LAMA_SIZE;
+  const plane = S * S;
 
-  const ph = Math.ceil(h / 8) * 8;
-  const pw = Math.ceil(w / 8) * 8;
+  const imgSmall = document.createElement("canvas");
+  imgSmall.width = S;
+  imgSmall.height = S;
+  const imgSmallCtx = imgSmall.getContext("2d");
+  imgSmallCtx.imageSmoothingEnabled = true;
+  imgSmallCtx.imageSmoothingQuality = "high";
+  imgSmallCtx.drawImage(els.imgCanvas, 0, 0, w, h, 0, 0, S, S);
+  const smallImgData = imgSmallCtx.getImageData(0, 0, S, S).data;
 
-  const tmpImg = document.createElement("canvas");
-  tmpImg.width = pw;
-  tmpImg.height = ph;
-  const tmpCtx = tmpImg.getContext("2d");
-  tmpCtx.drawImage(els.imgCanvas, 0, 0);
+  const maskBig = document.createElement("canvas");
+  maskBig.width = w;
+  maskBig.height = h;
+  const maskBigCtx = maskBig.getContext("2d");
+  const maskBigImg = maskBigCtx.createImageData(w, h);
+  for (let i = 0, j = 0; i < maskU8.length; i++, j += 4) {
+    const v = maskU8[i] > 0 ? 255 : 0;
+    maskBigImg.data[j] = v;
+    maskBigImg.data[j + 1] = v;
+    maskBigImg.data[j + 2] = v;
+    maskBigImg.data[j + 3] = 255;
+  }
+  maskBigCtx.putImageData(maskBigImg, 0, 0);
 
-  const padImgData = tmpCtx.getImageData(0, 0, pw, ph).data;
+  const maskSmall = document.createElement("canvas");
+  maskSmall.width = S;
+  maskSmall.height = S;
+  const maskSmallCtx = maskSmall.getContext("2d");
+  maskSmallCtx.imageSmoothingEnabled = true;
+  maskSmallCtx.drawImage(maskBig, 0, 0, w, h, 0, 0, S, S);
+  const smallMaskData = maskSmallCtx.getImageData(0, 0, S, S).data;
 
-  const imgArr = new Float32Array(3 * pw * ph);
-  const plane = pw * ph;
+  const imgArr = new Float32Array(3 * plane);
   for (let i = 0; i < plane; i++) {
-    imgArr[i] = padImgData[i * 4];
-    imgArr[plane + i] = padImgData[i * 4 + 1];
-    imgArr[2 * plane + i] = padImgData[i * 4 + 2];
+    imgArr[i] = smallImgData[i * 4];
+    imgArr[plane + i] = smallImgData[i * 4 + 1];
+    imgArr[2 * plane + i] = smallImgData[i * 4 + 2];
   }
 
   const maskArr = new Float32Array(plane);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      maskArr[y * pw + x] = maskU8[y * w + x] > 0 ? 1.0 : 0.0;
-    }
+  for (let i = 0; i < plane; i++) {
+    maskArr[i] = smallMaskData[i * 4] > 127 ? 1.0 : 0.0;
   }
 
-  const imgTensor = new ort.Tensor("float32", imgArr, [1, 3, ph, pw]);
-  const maskTensor = new ort.Tensor("float32", maskArr, [1, 1, ph, pw]);
+  const imgTensor = new ort.Tensor("float32", imgArr, [1, 3, S, S]);
+  const maskTensor = new ort.Tensor("float32", maskArr, [1, 1, S, S]);
 
   const inputNames = lamaSession.inputNames;
   const feeds = {};
@@ -421,19 +442,29 @@ async function inpaintWithLama(maskU8) {
   const out = results[outKey];
   const outArr = out.data;
 
-  const outImg = imgCtx.createImageData(w, h);
-  const od = outImg.data;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const srcI = y * pw + x;
-      const dstI = (y * w + x) * 4;
-      od[dstI]     = Math.max(0, Math.min(255, outArr[srcI]));
-      od[dstI + 1] = Math.max(0, Math.min(255, outArr[plane + srcI]));
-      od[dstI + 2] = Math.max(0, Math.min(255, outArr[2 * plane + srcI]));
-      od[dstI + 3] = 255;
-    }
+  const outSmall = document.createElement("canvas");
+  outSmall.width = S;
+  outSmall.height = S;
+  const outSmallCtx = outSmall.getContext("2d");
+  const outSmallImg = outSmallCtx.createImageData(S, S);
+  const osd = outSmallImg.data;
+  for (let i = 0; i < plane; i++) {
+    osd[i * 4]     = Math.max(0, Math.min(255, outArr[i]));
+    osd[i * 4 + 1] = Math.max(0, Math.min(255, outArr[plane + i]));
+    osd[i * 4 + 2] = Math.max(0, Math.min(255, outArr[2 * plane + i]));
+    osd[i * 4 + 3] = 255;
   }
-  return outImg;
+  outSmallCtx.putImageData(outSmallImg, 0, 0);
+
+  const outBig = document.createElement("canvas");
+  outBig.width = w;
+  outBig.height = h;
+  const outBigCtx = outBig.getContext("2d");
+  outBigCtx.imageSmoothingEnabled = true;
+  outBigCtx.imageSmoothingQuality = "high";
+  outBigCtx.drawImage(outSmall, 0, 0, S, S, 0, 0, w, h);
+
+  return outBigCtx.getImageData(0, 0, w, h);
 }
 
 function blendInpainted(originalImageData, inpaintedImageData, alpha, w, h) {
