@@ -3,30 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>מסיר סימני מים — Gemini AI</title>
+<title>מסיר סימני מים</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div class="container">
   <header>
     <h1>מסיר סימני מים</h1>
-    <p class="subtitle">מופעל על ידי Gemini 2.5 Flash Image</p>
+    <p class="subtitle">100% בדפדפן · ללא AI · ללא הרשמה</p>
   </header>
 
-  <section class="api-key-section">
-    <label for="apiKey">מפתח Gemini API</label>
-    <div class="key-row">
-      <input type="password" id="apiKey" placeholder="AIza..." autocomplete="off">
-      <button id="saveKey" class="btn btn-secondary">שמור</button>
-    </div>
-    <p class="hint">
-      קבל מפתח חינם ב-
-      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
-      נשמר בדפדפן בלבד (localStorage).
-    </p>
-  </section>
-
-  <section class="upload-section">
+  <section class="upload-section" id="uploadSection">
     <div id="dropZone" class="drop-zone">
       <input type="file" id="fileInput" accept="image/*" hidden>
       <div class="drop-content">
@@ -41,37 +28,54 @@
     </div>
   </section>
 
-  <section class="prompt-section">
-    <label for="prompt">הוראות נוספות (אופציונלי)</label>
-    <textarea id="prompt" rows="2" placeholder="למשל: הסר את הלוגו בפינה הימנית התחתונה"></textarea>
-  </section>
-
-  <section class="actions">
-    <button id="processBtn" class="btn btn-primary" disabled>הסר סימן מים</button>
-    <button id="resetBtn" class="btn btn-secondary">אפס</button>
-  </section>
-
-  <section id="status" class="status hidden"></section>
-
-  <section class="results hidden" id="resultsSection">
-    <div class="image-grid">
-      <div class="image-card">
-        <h3>מקור</h3>
-        <img id="originalImg" alt="מקור">
+  <section class="editor hidden" id="editorSection">
+    <div class="toolbar">
+      <div class="tool-group">
+        <label>גודל מברשת</label>
+        <input type="range" id="brushSize" min="5" max="80" value="20">
+        <span id="brushSizeVal">20</span>
       </div>
-      <div class="image-card">
-        <h3>תוצאה</h3>
-        <img id="resultImg" alt="תוצאה">
-        <a id="downloadBtn" class="btn btn-primary" download="cleaned.png">הורד תוצאה</a>
+      <div class="tool-group">
+        <label>רדיוס מילוי</label>
+        <input type="range" id="inpaintRadius" min="3" max="20" value="5">
+        <span id="inpaintRadiusVal">5</span>
+      </div>
+      <div class="tool-group">
+        <label>אלגוריתם</label>
+        <select id="algo">
+          <option value="telea">Telea (מהיר)</option>
+          <option value="ns">Navier-Stokes (איכותי)</option>
+        </select>
+      </div>
+      <div class="tool-group">
+        <button id="clearMaskBtn" class="btn btn-secondary">נקה מסכה</button>
+        <button id="undoBtn" class="btn btn-secondary">בטל</button>
       </div>
     </div>
+
+    <p class="instructions">צבע על סימן המים עם המברשת. לחץ "הסר" כשסיימת.</p>
+
+    <div class="canvas-wrap">
+      <canvas id="imgCanvas"></canvas>
+      <canvas id="maskCanvas"></canvas>
+    </div>
+
+    <div class="actions">
+      <button id="processBtn" class="btn btn-primary">הסר סימן מים</button>
+      <button id="downloadBtn" class="btn btn-primary hidden">הורד תוצאה</button>
+      <button id="resetBtn" class="btn btn-secondary">תמונה חדשה</button>
+    </div>
+
+    <div id="status" class="status hidden"></div>
   </section>
 
   <footer>
     <p>שימוש בתמונות שלך בלבד. הסרת סימני מים מתוכן זר עלולה להפר זכויות יוצרים.</p>
+    <p class="small">מבוסס על OpenCV.js · ללא העלאה לשרת</p>
   </footer>
 </div>
 
+<script async src="https://docs.opencv.org/4.x/opencv.js" id="opencvScript"></script>
 <script src="app.js"></script>
 </body>
 </html>

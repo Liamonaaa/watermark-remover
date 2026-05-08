@@ -1,32 +1,37 @@
 # Watermark Remover
 
-Static web app that removes watermarks from images using Google's Gemini 2.5 Flash Image model.
+100% client-side watermark removal. No AI, no API key, no signup, no upload — runs entirely in your browser using OpenCV.js classical inpainting (Telea / Navier-Stokes).
 
 ## Live demo
 
-Deployed via GitHub Pages.
+https://liamonaaa.github.io/watermark-remover/
 
 ## Usage
 
-1. Get a free Gemini API key at [Google AI Studio](https://aistudio.google.com/apikey).
-2. Paste the key and click Save (stored in `localStorage`, never sent anywhere except Google's API).
-3. Upload an image.
-4. Click "Remove watermark".
-5. Download the result.
+1. Upload an image.
+2. Paint over the watermark with the brush.
+3. Click "Remove watermark".
+4. Repeat if needed, then download.
 
 ## How it works
 
-- Pure client-side HTML/CSS/JS. No backend.
-- Calls `gemini-2.5-flash-image-preview` via the Generative Language API directly from the browser.
-- Sends the image inline as base64 with a watermark-removal prompt.
+- Image and mask live on two stacked HTML canvases.
+- On submit, the mask alpha channel is converted to a binary `cv.Mat`.
+- `cv.inpaint(src, mask, dst, radius, flag)` fills the masked region from surrounding pixels.
+  - **Telea**: Fast Marching Method. Faster.
+  - **Navier-Stokes**: Fluid dynamics analogy. Slower, often smoother on textured regions.
+
+Best on thin or semi-transparent watermarks over relatively uniform backgrounds. Less effective on opaque logos covering complex texture.
+
+## Tech
+
+- Vanilla HTML / CSS / JS.
+- [OpenCV.js](https://docs.opencv.org/4.x/opencv.js) loaded from CDN.
+- Hosted on GitHub Pages.
 
 ## Local development
 
-Open `index.html` in a browser. That's it.
-
-## Security note
-
-API key lives in `localStorage` and is exposed in network requests from the browser. Fine for personal use. Do not embed your own key in the HTML or share the deployed URL with your key prefilled.
+Open `index.html` directly in a browser. No build step.
 
 ## Legal
 

@@ -1,36 +1,52 @@
-const MODEL = "gemini-2.5-flash-image-preview";
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-
 const els = {
-  apiKey: document.getElementById("apiKey"),
-  saveKey: document.getElementById("saveKey"),
+  uploadSection: document.getElementById("uploadSection"),
+  editorSection: document.getElementById("editorSection"),
   dropZone: document.getElementById("dropZone"),
   fileInput: document.getElementById("fileInput"),
-  prompt: document.getElementById("prompt"),
+  imgCanvas: document.getElementById("imgCanvas"),
+  maskCanvas: document.getElementById("maskCanvas"),
+  brushSize: document.getElementById("brushSize"),
+  brushSizeVal: document.getElementById("brushSizeVal"),
+  inpaintRadius: document.getElementById("inpaintRadius"),
+  inpaintRadiusVal: document.getElementById("inpaintRadiusVal"),
+  algo: document.getElementById("algo"),
+  clearMaskBtn: document.getElementById("clearMaskBtn"),
+  undoBtn: document.getElementById("undoBtn"),
   processBtn: document.getElementById("processBtn"),
+  downloadBtn: document.getElementById("downloadBtn"),
   resetBtn: document.getElementById("resetBtn"),
   status: document.getElementById("status"),
-  resultsSection: document.getElementById("resultsSection"),
-  originalImg: document.getElementById("originalImg"),
-  resultImg: document.getElementById("resultImg"),
-  downloadBtn: document.getElementById("downloadBtn"),
 };
 
-let currentFile = null;
-let currentDataUrl = null;
+const imgCtx = els.imgCanvas.getContext("2d");
+const maskCtx = els.maskCanvas.getContext("2d");
 
-const savedKey = localStorage.getItem("gemini_api_key");
-if (savedKey) els.apiKey.value = savedKey;
+let cvReady = false;
+let originalImageData = null;
+let maskHistory = [];
+let drawing = false;
+let lastPoint = null;
 
-els.saveKey.addEventListener("click", () => {
-  const k = els.apiKey.value.trim();
-  if (!k) {
-    setStatus("הזן מפתח", "error");
-    return;
+window.addEventListener("load", () => {
+  if (window.cv && window.cv.Mat) {
+    cvReady = true;
+  } else {
+    setStatus(`טוען OpenCV<span class="spinner"></span>`, "loading");
+    const check = setInterval(() => {
+      if (window.cv && window.cv.Mat) {
+        cvReady = true;
+        clearInterval(check);
+        clearStatus();
+      }
+    }, 200);
   }
-  localStorage.setItem("gemini_api_key", k);
-  setStatus("מפתח נשמר", "success");
-  setTimeout(() => clearStatus(), 2000);
+});
+
+els.brushSize.addEventListener("input", () => {
+  els.brushSizeVal.textContent = els.brushSize.value;
+});
+els.inpaintRadius.addEventListener("input", () => {
+  els.inpaintRadiusVal.textContent = els.inpaintRadius.value;
 });
 
 els.dropZone.addEventListener("click", () => els.fileInput.click());
@@ -39,145 +55,222 @@ els.dropZone.addEventListener("dragover", (e) => {
   e.preventDefault();
   els.dropZone.classList.add("dragover");
 });
-
 els.dropZone.addEventListener("dragleave", () => {
   els.dropZone.classList.remove("dragover");
 });
-
 els.dropZone.addEventListener("drop", (e) => {
   e.preventDefault();
   els.dropZone.classList.remove("dragover");
   const file = e.dataTransfer.files[0];
-  if (file) handleFile(file);
+  if (file) loadImage(file);
 });
 
 els.fileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
-  if (file) handleFile(file);
+  if (file) loadImage(file);
 });
 
-function handleFile(file) {
+function loadImage(file) {
   if (!file.type.startsWith("image/")) {
     setStatus("רק קבצי תמונה", "error");
     return;
   }
-  currentFile = file;
   const reader = new FileReader();
   reader.onload = (e) => {
-    currentDataUrl = e.target.result;
-    els.dropZone.classList.add("has-file");
-    els.dropZone.innerHTML = `<img src="${currentDataUrl}" class="preview-img" alt="תצוגה מקדימה">`;
-    els.processBtn.disabled = false;
-    clearStatus();
+    const img = new Image();
+    img.onload = () => {
+      setupCanvas(img);
+      els.uploadSection.classList.add("hidden");
+      els.editorSection.classList.remove("hidden");
+      clearStatus();
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
 
-els.processBtn.addEventListener("click", processImage);
+function setupCanvas(img) {
+  const maxSide = 1600;
+  let w = img.naturalWidth;
+  let h = img.naturalHeight;
+  if (Math.max(w, h) > maxSide) {
+    const scale = maxSide / Math.max(w, h);
+    w = Math.round(w * scale);
+    h = Math.round(h * scale);
+  }
+
+  els.imgCanvas.width = w;
+  els.imgCanvas.height = h;
+  els.maskCanvas.width = w;
+  els.maskCanvas.height = h;
+
+  imgCtx.drawImage(img, 0, 0, w, h);
+  originalImageData = imgCtx.getImageData(0, 0, w, h);
+
+  maskCtx.clearRect(0, 0, w, h);
+  maskHistory = [];
+
+  els.downloadBtn.classList.add("hidden");
+  els.processBtn.disabled = false;
+}
+
+function getCanvasPoint(e) {
+  const rect = els.maskCanvas.getBoundingClientRect();
+  const scaleX = els.maskCanvas.width / rect.width;
+  const scaleY = els.maskCanvas.height / rect.height;
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY
+  };
+}
+
+function startDraw(e) {
+  e.preventDefault();
+  drawing = true;
+  maskHistory.push(maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height));
+  if (maskHistory.length > 20) maskHistory.shift();
+  lastPoint = getCanvasPoint(e);
+  drawDot(lastPoint);
+}
+
+function drawMove(e) {
+  if (!drawing) return;
+  e.preventDefault();
+  const p = getCanvasPoint(e);
+  drawLine(lastPoint, p);
+  lastPoint = p;
+}
+
+function endDraw() {
+  drawing = false;
+  lastPoint = null;
+}
+
+function drawDot(p) {
+  const size = parseInt(els.brushSize.value, 10);
+  maskCtx.fillStyle = "#ff3366";
+  maskCtx.beginPath();
+  maskCtx.arc(p.x, p.y, size / 2, 0, Math.PI * 2);
+  maskCtx.fill();
+}
+
+function drawLine(a, b) {
+  const size = parseInt(els.brushSize.value, 10);
+  maskCtx.strokeStyle = "#ff3366";
+  maskCtx.fillStyle = "#ff3366";
+  maskCtx.lineWidth = size;
+  maskCtx.lineCap = "round";
+  maskCtx.lineJoin = "round";
+  maskCtx.beginPath();
+  maskCtx.moveTo(a.x, a.y);
+  maskCtx.lineTo(b.x, b.y);
+  maskCtx.stroke();
+}
+
+els.maskCanvas.addEventListener("mousedown", startDraw);
+els.maskCanvas.addEventListener("mousemove", drawMove);
+window.addEventListener("mouseup", endDraw);
+els.maskCanvas.addEventListener("touchstart", startDraw, { passive: false });
+els.maskCanvas.addEventListener("touchmove", drawMove, { passive: false });
+els.maskCanvas.addEventListener("touchend", endDraw);
+
+els.clearMaskBtn.addEventListener("click", () => {
+  maskHistory.push(maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height));
+  maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
+});
+
+els.undoBtn.addEventListener("click", () => {
+  if (maskHistory.length === 0) return;
+  const prev = maskHistory.pop();
+  maskCtx.putImageData(prev, 0, 0);
+});
+
+els.processBtn.addEventListener("click", processInpaint);
 
 els.resetBtn.addEventListener("click", () => {
-  currentFile = null;
-  currentDataUrl = null;
+  els.uploadSection.classList.remove("hidden");
+  els.editorSection.classList.add("hidden");
   els.fileInput.value = "";
-  els.processBtn.disabled = true;
-  els.resultsSection.classList.add("hidden");
-  els.dropZone.classList.remove("has-file");
-  els.dropZone.innerHTML = `
-    <input type="file" id="fileInput" accept="image/*" hidden>
-    <div class="drop-content">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-        <polyline points="17 8 12 3 7 8"/>
-        <line x1="12" y1="3" x2="12" y2="15"/>
-      </svg>
-      <p>גרור תמונה או לחץ לבחירה</p>
-      <p class="small">PNG, JPG, WEBP</p>
-    </div>
-  `;
-  els.fileInput = document.getElementById("fileInput");
-  els.fileInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (file) handleFile(file);
-  });
+  imgCtx.clearRect(0, 0, els.imgCanvas.width, els.imgCanvas.height);
+  maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
+  maskHistory = [];
+  originalImageData = null;
   clearStatus();
 });
 
-async function processImage() {
-  const apiKey = els.apiKey.value.trim();
-  if (!apiKey) {
-    setStatus("חסר מפתח API", "error");
+function maskHasContent() {
+  const data = maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height).data;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] > 0) return true;
+  }
+  return false;
+}
+
+async function processInpaint() {
+  if (!cvReady) {
+    setStatus("OpenCV עדיין נטען, נסה שוב בעוד רגע", "error");
     return;
   }
-  if (!currentFile || !currentDataUrl) {
-    setStatus("העלה תמונה", "error");
+  if (!maskHasContent()) {
+    setStatus("צבע על סימן המים עם המברשת", "error");
     return;
   }
 
   els.processBtn.disabled = true;
-  setStatus(`מעבד תמונה<span class="spinner"></span>`, "loading");
+  setStatus(`מעבד<span class="spinner"></span>`, "loading");
 
+  await new Promise(r => setTimeout(r, 30));
+
+  let src = null, mask = null, dst = null;
   try {
-    const base64 = currentDataUrl.split(",")[1];
-    const mimeType = currentFile.type;
-    const userPrompt = els.prompt.value.trim();
+    src = cv.imread(els.imgCanvas);
+    cv.cvtColor(src, src, cv.COLOR_RGBA2RGB);
 
-    const instruction = userPrompt
-      ? `Remove all watermarks, logos, and text overlays from this image. ${userPrompt}. Preserve the original content, composition, colors, and details. Inpaint the watermarked areas naturally to match the surrounding content.`
-      : "Remove all watermarks, logos, and text overlays from this image. Preserve the original content, composition, colors, and details. Inpaint the watermarked areas naturally to match the surrounding content.";
-
-    const body = {
-      contents: [{
-        parts: [
-          { text: instruction },
-          { inline_data: { mime_type: mimeType, data: base64 } }
-        ]
-      }],
-      generationConfig: {
-        responseModalities: ["IMAGE"]
-      }
-    };
-
-    const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      let errMsg = `שגיאת API ${res.status}`;
-      try {
-        const errJson = JSON.parse(errText);
-        if (errJson.error?.message) errMsg += `: ${errJson.error.message}`;
-      } catch {}
-      throw new Error(errMsg);
+    const maskImageData = maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height);
+    mask = new cv.Mat(maskImageData.height, maskImageData.width, cv.CV_8UC1);
+    const maskData = maskImageData.data;
+    for (let i = 0, j = 0; i < maskData.length; i += 4, j++) {
+      mask.data[j] = maskData[i + 3] > 0 ? 255 : 0;
     }
 
-    const data = await res.json();
-    const parts = data.candidates?.[0]?.content?.parts || [];
-    const imagePart = parts.find(p => p.inline_data || p.inlineData);
+    dst = new cv.Mat();
+    const radius = parseInt(els.inpaintRadius.value, 10);
+    const flag = els.algo.value === "ns" ? cv.INPAINT_NS : cv.INPAINT_TELEA;
+    cv.inpaint(src, mask, dst, radius, flag);
 
-    if (!imagePart) {
-      const textPart = parts.find(p => p.text);
-      throw new Error(textPart?.text || "המודל לא החזיר תמונה");
-    }
+    cv.cvtColor(dst, dst, cv.COLOR_RGB2RGBA);
+    cv.imshow(els.imgCanvas, dst);
 
-    const imgData = imagePart.inline_data || imagePart.inlineData;
-    const outMime = imgData.mime_type || imgData.mimeType || "image/png";
-    const outDataUrl = `data:${outMime};base64,${imgData.data}`;
+    maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
+    maskHistory = [];
 
-    els.originalImg.src = currentDataUrl;
-    els.resultImg.src = outDataUrl;
-    els.downloadBtn.href = outDataUrl;
-    els.resultsSection.classList.remove("hidden");
-    setStatus("הושלם", "success");
+    els.downloadBtn.classList.remove("hidden");
+    setStatus("הושלם. ניתן לצבוע שוב לתיקון נוסף", "success");
   } catch (err) {
     console.error(err);
-    setStatus(err.message || "שגיאה", "error");
+    setStatus(`שגיאה: ${err.message || err}`, "error");
   } finally {
+    if (src) src.delete();
+    if (mask) mask.delete();
+    if (dst) dst.delete();
     els.processBtn.disabled = false;
   }
 }
+
+els.downloadBtn.addEventListener("click", () => {
+  els.imgCanvas.toBlob((blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cleaned.png";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, "image/png");
+});
 
 function setStatus(html, kind = "") {
   els.status.className = `status ${kind}`;
