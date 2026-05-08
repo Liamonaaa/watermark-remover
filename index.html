@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מסיר סימני מים — Gemini AI</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>מסיר סימני מים</h1>
+    <p class="subtitle">מופעל על ידי Gemini 2.5 Flash Image</p>
+  </header>
+
+  <section class="api-key-section">
+    <label for="apiKey">מפתח Gemini API</label>
+    <div class="key-row">
+      <input type="password" id="apiKey" placeholder="AIza..." autocomplete="off">
+      <button id="saveKey" class="btn btn-secondary">שמור</button>
+    </div>
+    <p class="hint">
+      קבל מפתח חינם ב-
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
+      נשמר בדפדפן בלבד (localStorage).
+    </p>
+  </section>
+
+  <section class="upload-section">
+    <div id="dropZone" class="drop-zone">
+      <input type="file" id="fileInput" accept="image/*" hidden>
+      <div class="drop-content">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p>גרור תמונה או לחץ לבחירה</p>
+        <p class="small">PNG, JPG, WEBP</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="prompt-section">
+    <label for="prompt">הוראות נוספות (אופציונלי)</label>
+    <textarea id="prompt" rows="2" placeholder="למשל: הסר את הלוגו בפינה הימנית התחתונה"></textarea>
+  </section>
+
+  <section class="actions">
+    <button id="processBtn" class="btn btn-primary" disabled>הסר סימן מים</button>
+    <button id="resetBtn" class="btn btn-secondary">אפס</button>
+  </section>
+
+  <section id="status" class="status hidden"></section>
+
+  <section class="results hidden" id="resultsSection">
+    <div class="image-grid">
+      <div class="image-card">
+        <h3>מקור</h3>
+        <img id="originalImg" alt="מקור">
+      </div>
+      <div class="image-card">
+        <h3>תוצאה</h3>
+        <img id="resultImg" alt="תוצאה">
+        <a id="downloadBtn" class="btn btn-primary" download="cleaned.png">הורד תוצאה</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>שימוש בתמונות שלך בלבד. הסרת סימני מים מתוכן זר עלולה להפר זכויות יוצרים.</p>
+  </footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
