@@ -26,7 +26,7 @@ const els = {
   aiBody: document.getElementById("aiBody"),
 };
 
-const GEMINI_MODEL = "gemini-2.5-flash-image-preview";
+const GEMINI_MODEL = "gemini-2.5-flash-image";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const savedKey = localStorage.getItem("gemini_api_key");
