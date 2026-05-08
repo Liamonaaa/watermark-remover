@@ -12,7 +12,9 @@ const els = {
   maskDilateVal: document.getElementById("maskDilateVal"),
   featherSize: document.getElementById("featherSize"),
   featherSizeVal: document.getElementById("featherSizeVal"),
+  clearMaskBtn: document.getElementById("clearMaskBtn"),
   undoBtn: document.getElementById("undoBtn"),
+  removeBtn: document.getElementById("removeBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
   resetBtn: document.getElementById("resetBtn"),
   status: document.getElementById("status"),
@@ -27,6 +29,9 @@ const imgCtx = els.imgCanvas.getContext("2d", { willReadFrequently: true });
 const maskCtx = els.maskCanvas.getContext("2d", { willReadFrequently: true });
 
 let imageHistory = [];
+let currentMask = null;
+let isDragging = false;
+let lastWandPos = null;
 const MASK_COLOR = [255, 51, 102];
 const HISTORY_LIMIT = 15;
 
@@ -98,8 +103,10 @@ function setupCanvas(img) {
   imgCtx.drawImage(img, 0, 0, w, h);
   maskCtx.clearRect(0, 0, w, h);
   imageHistory = [];
+  currentMask = null;
   els.maskCanvas.style.cursor = "pointer";
   els.downloadBtn.classList.add("hidden");
+  els.removeBtn.disabled = true;
 }
 
 function getCanvasPoint(e) {
@@ -122,8 +129,13 @@ function pushImageHistory() {
 }
 
 function colorDistance(r1, g1, b1, r2, g2, b2) {
+  const rmean = (r1 + r2) / 2;
   const dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
-  return Math.sqrt(dr * dr + dg * dg + db * db);
+  return Math.sqrt(
+    (((512 + rmean) * dr * dr) / 256) +
+    4 * dg * dg +
+    (((767 - rmean) * db * db) / 256)
+  );
 }
 
 function buildWandMask(sx, sy) {
@@ -131,6 +143,7 @@ function buildWandMask(sx, sy) {
   const h = els.imgCanvas.height;
   const imgData = imgCtx.getImageData(0, 0, w, h);
   const data = imgData.data;
+  if (sx < 0 || sy < 0 || sx >= w || sy >= h) return null;
   const idx = (sy * w + sx) * 4;
   const tr = data[idx], tg = data[idx + 1], tb = data[idx + 2];
   const tolerance = parseInt(els.wandTolerance.value, 10);
@@ -186,6 +199,34 @@ function dilateMask(mask, w, h, radius) {
   return cur;
 }
 
+function erodeMask(mask, w, h, radius) {
+  if (radius <= 0) return mask;
+  let cur = mask;
+  for (let r = 0; r < radius; r++) {
+    const next = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (!cur[i]) continue;
+        if (
+          (x === 0 || cur[i - 1]) &&
+          (x === w - 1 || cur[i + 1]) &&
+          (y === 0 || cur[i - w]) &&
+          (y === h - 1 || cur[i + w])
+        ) {
+          next[i] = 255;
+        }
+      }
+    }
+    cur = next;
+  }
+  return cur;
+}
+
+function closeMask(mask, w, h, radius) {
+  return erodeMask(dilateMask(mask, w, h, radius), w, h, radius);
+}
+
 function featherMask(mask, w, h, radius) {
   if (radius <= 0) {
     const out = new Float32Array(w * h);
@@ -233,16 +274,35 @@ function featherMask(mask, w, h, radius) {
   return alpha;
 }
 
-function showMaskPreview(mask, w, h) {
+function renderMaskOverlay() {
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+  if (!currentMask) {
+    maskCtx.clearRect(0, 0, w, h);
+    return;
+  }
   const out = maskCtx.createImageData(w, h);
   const od = out.data;
   const [mr, mg, mb] = MASK_COLOR;
-  for (let i = 0, j = 0; i < mask.length; i++, j += 4) {
-    if (mask[i]) {
+  for (let i = 0, j = 0; i < currentMask.length; i++, j += 4) {
+    if (currentMask[i]) {
       od[j] = mr; od[j + 1] = mg; od[j + 2] = mb; od[j + 3] = 180;
     }
   }
   maskCtx.putImageData(out, 0, 0);
+}
+
+function addWandAt(x, y) {
+  const newMask = buildWandMask(x, y);
+  if (!newMask) return 0;
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+  if (!currentMask) currentMask = new Uint8Array(w * h);
+  let added = 0;
+  for (let i = 0; i < newMask.length; i++) {
+    if (newMask[i] && !currentMask[i]) { currentMask[i] = 255; added++; }
+  }
+  return added;
 }
 
 function loadScript(src) {
@@ -315,9 +375,8 @@ async function loadLama() {
     els.aiStatus.textContent = "מוכן ✓";
     els.aiStatus.className = "ai-status ready";
     els.loadLamaBtn.textContent = "✓ מודל נטען";
-    els.loadLamaBtn.disabled = true;
     els.loadProgress.classList.add("hidden");
-    setStatus("מודל LaMa מוכן. לחיצה על סימן מים = AI יסיר אותו", "success");
+    setStatus("מודל LaMa מוכן. סמן את סימן המים ולחץ הסר", "success");
   } catch (err) {
     console.error(err);
     els.aiStatus.textContent = "כשל בטעינה";
@@ -475,47 +534,97 @@ function blendInpainted(originalImageData, inpaintedImageData, alpha, w, h) {
   }
 }
 
-els.maskCanvas.addEventListener("click", async (e) => {
+function startSelect(e) {
+  e.preventDefault();
+  isDragging = true;
+  const p = getCanvasPoint(e);
+  lastWandPos = p;
+  const added = addWandAt(p.x, p.y);
+  if (added > 0) {
+    renderMaskOverlay();
+    els.removeBtn.disabled = false;
+  }
+}
+
+function moveSelect(e) {
+  if (!isDragging) return;
+  e.preventDefault();
+  const p = getCanvasPoint(e);
+  const dist = lastWandPos ? Math.hypot(p.x - lastWandPos.x, p.y - lastWandPos.y) : Infinity;
+  if (dist < 8) return;
+  lastWandPos = p;
+  const added = addWandAt(p.x, p.y);
+  if (added > 0) {
+    renderMaskOverlay();
+    els.removeBtn.disabled = false;
+  }
+}
+
+function endSelect() {
+  isDragging = false;
+  lastWandPos = null;
+}
+
+els.maskCanvas.addEventListener("mousedown", startSelect);
+els.maskCanvas.addEventListener("mousemove", moveSelect);
+window.addEventListener("mouseup", endSelect);
+els.maskCanvas.addEventListener("touchstart", startSelect, { passive: false });
+els.maskCanvas.addEventListener("touchmove", moveSelect, { passive: false });
+els.maskCanvas.addEventListener("touchend", endSelect);
+
+els.clearMaskBtn.addEventListener("click", () => {
+  currentMask = null;
+  renderMaskOverlay();
+  els.removeBtn.disabled = true;
+  clearStatus();
+});
+
+els.removeBtn.addEventListener("click", async () => {
   if (!lamaSession) {
     setStatus("טען את מודל ה-AI תחילה", "error");
     return;
   }
-
-  const p = getCanvasPoint(e);
-  const w = els.imgCanvas.width;
-  const h = els.imgCanvas.height;
-
-  let mask = buildWandMask(p.x, p.y);
-  let count = 0;
-  for (let i = 0; i < mask.length; i++) if (mask[i]) count++;
-  if (count === 0) {
-    setStatus("לא זוהה אזור — נסה להגדיל טולרנס", "error");
+  if (!currentMask) {
+    setStatus("סמן את סימן המים תחילה", "error");
     return;
   }
 
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+
+  let mask = closeMask(currentMask, w, h, 2);
+
   const dilateAmount = parseInt(els.maskDilate.value, 10);
-  mask = dilateMask(mask, w, h, dilateAmount);
+  if (dilateAmount > 0) mask = dilateMask(mask, w, h, dilateAmount);
+
+  let count = 0;
+  for (let i = 0; i < mask.length; i++) if (mask[i]) count++;
+  if (count === 0) {
+    setStatus("מסכה ריקה", "error");
+    return;
+  }
 
   const featherAmount = parseInt(els.featherSize.value, 10);
   const alpha = featherMask(mask, w, h, featherAmount);
 
-  showMaskPreview(mask, w, h);
-  await new Promise(r => setTimeout(r, 50));
-
+  els.removeBtn.disabled = true;
   setStatus(`AI מעבד<span class="spinner"></span>`, "loading");
+  await new Promise(r => setTimeout(r, 30));
+
   try {
     const inpainted = await inpaintWithLama(mask);
     pushImageHistory();
     const original = imgCtx.getImageData(0, 0, w, h);
     blendInpainted(original, inpainted, alpha, w, h);
     imgCtx.putImageData(original, 0, 0);
-    maskCtx.clearRect(0, 0, w, h);
+    currentMask = null;
+    renderMaskOverlay();
     els.downloadBtn.classList.remove("hidden");
     setStatus(`הוסר ${count.toLocaleString()} פיקסלים`, "success");
   } catch (err) {
     console.error(err);
-    maskCtx.clearRect(0, 0, w, h);
     setStatus(`שגיאת AI: ${err.message}`, "error");
+    els.removeBtn.disabled = false;
   }
 });
 
@@ -536,6 +645,8 @@ els.resetBtn.addEventListener("click", () => {
   imgCtx.clearRect(0, 0, els.imgCanvas.width, els.imgCanvas.height);
   maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
   imageHistory = [];
+  currentMask = null;
+  els.removeBtn.disabled = true;
   clearStatus();
 });
 

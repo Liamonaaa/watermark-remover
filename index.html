@@ -53,15 +53,19 @@
 
     <div class="workflow">
       <div class="step">
-        <span class="step-text">טען את מודל ה-AI ולחץ על סימן המים בתמונה — AI יזהה ויסיר אותו</span>
+        <span class="step-text">
+          1. טען את מודל ה-AI.
+          2. לחץ או גרור על סימן המים — לחיצות מתווספות עד שמסומן הכל.
+          3. לחץ "הסר עם AI".
+        </span>
       </div>
     </div>
 
     <div class="controls-panel">
       <div class="tool-group">
         <label>טולרנס זיהוי</label>
-        <input type="range" id="wandTolerance" min="5" max="80" value="25">
-        <span id="wandToleranceVal">25</span>
+        <input type="range" id="wandTolerance" min="5" max="120" value="40">
+        <span id="wandToleranceVal">40</span>
       </div>
       <div class="tool-group">
         <label>הרחבת אזור</label>
@@ -80,6 +84,7 @@
         </label>
       </div>
       <div class="tool-group">
+        <button id="clearMaskBtn" class="btn btn-secondary">נקה סימון</button>
         <button id="undoBtn" class="btn btn-secondary">בטל</button>
       </div>
     </div>
@@ -90,6 +95,7 @@
     </div>
 
     <div class="actions">
+      <button id="removeBtn" class="btn btn-primary" disabled>🤖 הסר עם AI</button>
       <button id="downloadBtn" class="btn btn-primary hidden">הורד תוצאה</button>
       <button id="resetBtn" class="btn btn-secondary">תמונה חדשה</button>
     </div>
