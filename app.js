@@ -332,11 +332,48 @@ async function loadLama() {
 
 const LAMA_SIZE = 512;
 
+function maskBoundingBox(maskU8, w, h) {
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (maskU8[y * w + x]) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
 async function inpaintWithLama(maskU8) {
-  const w = els.imgCanvas.width;
-  const h = els.imgCanvas.height;
+  const W = els.imgCanvas.width;
+  const H = els.imgCanvas.height;
   const S = LAMA_SIZE;
   const plane = S * S;
+
+  const bbox = maskBoundingBox(maskU8, W, H);
+  if (!bbox) throw new Error("מסכה ריקה");
+
+  const margin = Math.max(64, Math.round(Math.max(bbox.w, bbox.h) * 1.5));
+  let cropX = Math.max(0, bbox.x - margin);
+  let cropY = Math.max(0, bbox.y - margin);
+  let cropEndX = Math.min(W, bbox.x + bbox.w + margin);
+  let cropEndY = Math.min(H, bbox.y + bbox.h + margin);
+  let cropW = cropEndX - cropX;
+  let cropH = cropEndY - cropY;
+
+  const sideMax = Math.max(cropW, cropH);
+  const padW = sideMax - cropW;
+  const padH = sideMax - cropH;
+  const padLeft = Math.min(cropX, Math.floor(padW / 2));
+  const padTop = Math.min(cropY, Math.floor(padH / 2));
+  cropX -= padLeft;
+  cropY -= padTop;
+  cropW = Math.min(W - cropX, sideMax);
+  cropH = Math.min(H - cropY, sideMax);
 
   const imgSmall = document.createElement("canvas");
   imgSmall.width = S;
@@ -344,14 +381,14 @@ async function inpaintWithLama(maskU8) {
   const imgSmallCtx = imgSmall.getContext("2d");
   imgSmallCtx.imageSmoothingEnabled = true;
   imgSmallCtx.imageSmoothingQuality = "high";
-  imgSmallCtx.drawImage(els.imgCanvas, 0, 0, w, h, 0, 0, S, S);
+  imgSmallCtx.drawImage(els.imgCanvas, cropX, cropY, cropW, cropH, 0, 0, S, S);
   const smallImgData = imgSmallCtx.getImageData(0, 0, S, S).data;
 
   const maskBig = document.createElement("canvas");
-  maskBig.width = w;
-  maskBig.height = h;
+  maskBig.width = W;
+  maskBig.height = H;
   const maskBigCtx = maskBig.getContext("2d");
-  const maskBigImg = maskBigCtx.createImageData(w, h);
+  const maskBigImg = maskBigCtx.createImageData(W, H);
   for (let i = 0, j = 0; i < maskU8.length; i++, j += 4) {
     const v = maskU8[i] > 0 ? 255 : 0;
     maskBigImg.data[j] = v;
@@ -365,8 +402,8 @@ async function inpaintWithLama(maskU8) {
   maskSmall.width = S;
   maskSmall.height = S;
   const maskSmallCtx = maskSmall.getContext("2d");
-  maskSmallCtx.imageSmoothingEnabled = true;
-  maskSmallCtx.drawImage(maskBig, 0, 0, w, h, 0, 0, S, S);
+  maskSmallCtx.imageSmoothingEnabled = false;
+  maskSmallCtx.drawImage(maskBig, cropX, cropY, cropW, cropH, 0, 0, S, S);
   const smallMaskData = maskSmallCtx.getImageData(0, 0, S, S).data;
 
   const imgArr = new Float32Array(3 * plane);
@@ -406,22 +443,23 @@ async function inpaintWithLama(maskU8) {
   }
   const scale = maxV <= 1.5 ? 255 : 1;
   for (let i = 0; i < plane; i++) {
-    osd[i * 4]     = Math.max(0, Math.min(255, outArr[i]                * scale));
-    osd[i * 4 + 1] = Math.max(0, Math.min(255, outArr[plane + i]        * scale));
-    osd[i * 4 + 2] = Math.max(0, Math.min(255, outArr[2 * plane + i]    * scale));
+    osd[i * 4]     = Math.max(0, Math.min(255, outArr[i]             * scale));
+    osd[i * 4 + 1] = Math.max(0, Math.min(255, outArr[plane + i]     * scale));
+    osd[i * 4 + 2] = Math.max(0, Math.min(255, outArr[2 * plane + i] * scale));
     osd[i * 4 + 3] = 255;
   }
   outSmallCtx.putImageData(outSmallImg, 0, 0);
 
-  const outBig = document.createElement("canvas");
-  outBig.width = w;
-  outBig.height = h;
-  const outBigCtx = outBig.getContext("2d");
-  outBigCtx.imageSmoothingEnabled = true;
-  outBigCtx.imageSmoothingQuality = "high";
-  outBigCtx.drawImage(outSmall, 0, 0, S, S, 0, 0, w, h);
+  const outFull = document.createElement("canvas");
+  outFull.width = W;
+  outFull.height = H;
+  const outFullCtx = outFull.getContext("2d");
+  outFullCtx.drawImage(els.imgCanvas, 0, 0);
+  outFullCtx.imageSmoothingEnabled = true;
+  outFullCtx.imageSmoothingQuality = "high";
+  outFullCtx.drawImage(outSmall, 0, 0, S, S, cropX, cropY, cropW, cropH);
 
-  return outBigCtx.getImageData(0, 0, w, h);
+  return outFullCtx.getImageData(0, 0, W, H);
 }
 
 function blendInpainted(originalImageData, inpaintedImageData, alpha, w, h) {
