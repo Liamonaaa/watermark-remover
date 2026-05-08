@@ -80,14 +80,79 @@ label {
 .drop-content p { color: var(--text); }
 .drop-content .small { color: var(--text-dim); font-size: 0.85rem; margin-top: 0.25rem; }
 
-.toolbar {
+.tool-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.tab {
+  padding: 0.6rem 1rem;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.tab:hover { color: var(--text); }
+
+.tab.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.tool-panel {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
   display: flex;
   flex-wrap: wrap;
-  gap: 1.25rem;
+  gap: 1rem;
+  align-items: center;
+}
+
+.tool-panel .instructions {
+  width: 100%;
+  margin-bottom: 0.25rem;
+  text-align: right;
+}
+
+.common-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
   align-items: center;
   margin-bottom: 1rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border);
+  padding: 1rem;
+  background: var(--surface-2);
+  border-radius: 8px;
+}
+
+input[type="color"] {
+  width: 48px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  padding: 2px;
+}
+
+input[type="checkbox"] {
+  accent-color: var(--primary);
+  margin-left: 0.4rem;
+}
+
+.tool-group label input[type="checkbox"] {
+  vertical-align: middle;
 }
 
 .tool-group {

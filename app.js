@@ -7,6 +7,15 @@ const els = {
   maskCanvas: document.getElementById("maskCanvas"),
   brushSize: document.getElementById("brushSize"),
   brushSizeVal: document.getElementById("brushSizeVal"),
+  wandTolerance: document.getElementById("wandTolerance"),
+  wandToleranceVal: document.getElementById("wandToleranceVal"),
+  wandContiguous: document.getElementById("wandContiguous"),
+  autoColor: document.getElementById("autoColor"),
+  autoTolerance: document.getElementById("autoTolerance"),
+  autoToleranceVal: document.getElementById("autoToleranceVal"),
+  autoDetectBtn: document.getElementById("autoDetectBtn"),
+  maskDilate: document.getElementById("maskDilate"),
+  maskDilateVal: document.getElementById("maskDilateVal"),
   inpaintRadius: document.getElementById("inpaintRadius"),
   inpaintRadiusVal: document.getElementById("inpaintRadiusVal"),
   algo: document.getElementById("algo"),
@@ -16,16 +25,19 @@ const els = {
   downloadBtn: document.getElementById("downloadBtn"),
   resetBtn: document.getElementById("resetBtn"),
   status: document.getElementById("status"),
+  tabs: document.querySelectorAll(".tab"),
 };
 
-const imgCtx = els.imgCanvas.getContext("2d");
-const maskCtx = els.maskCanvas.getContext("2d");
+const imgCtx = els.imgCanvas.getContext("2d", { willReadFrequently: true });
+const maskCtx = els.maskCanvas.getContext("2d", { willReadFrequently: true });
 
 let cvReady = false;
 let originalImageData = null;
 let maskHistory = [];
 let drawing = false;
 let lastPoint = null;
+let currentTool = "brush";
+const MASK_COLOR = [255, 51, 102];
 
 window.addEventListener("load", () => {
   if (window.cv && window.cv.Mat) {
@@ -42,15 +54,27 @@ window.addEventListener("load", () => {
   }
 });
 
-els.brushSize.addEventListener("input", () => {
-  els.brushSizeVal.textContent = els.brushSize.value;
-});
-els.inpaintRadius.addEventListener("input", () => {
-  els.inpaintRadiusVal.textContent = els.inpaintRadius.value;
+const bindRange = (input, label) => {
+  input.addEventListener("input", () => { label.textContent = input.value; });
+};
+bindRange(els.brushSize, els.brushSizeVal);
+bindRange(els.wandTolerance, els.wandToleranceVal);
+bindRange(els.autoTolerance, els.autoToleranceVal);
+bindRange(els.maskDilate, els.maskDilateVal);
+bindRange(els.inpaintRadius, els.inpaintRadiusVal);
+
+els.tabs.forEach(tab => {
+  tab.addEventListener("click", () => {
+    els.tabs.forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    currentTool = tab.dataset.tool;
+    document.querySelectorAll(".tool-panel").forEach(p => p.classList.add("hidden"));
+    document.getElementById(`panel-${currentTool}`).classList.remove("hidden");
+    els.maskCanvas.style.cursor = currentTool === "brush" ? "crosshair" : "pointer";
+  });
 });
 
 els.dropZone.addEventListener("click", () => els.fileInput.click());
-
 els.dropZone.addEventListener("dragover", (e) => {
   e.preventDefault();
   els.dropZone.classList.add("dragover");
@@ -64,7 +88,6 @@ els.dropZone.addEventListener("drop", (e) => {
   const file = e.dataTransfer.files[0];
   if (file) loadImage(file);
 });
-
 els.fileInput.addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (file) loadImage(file);
@@ -98,18 +121,14 @@ function setupCanvas(img) {
     w = Math.round(w * scale);
     h = Math.round(h * scale);
   }
-
   els.imgCanvas.width = w;
   els.imgCanvas.height = h;
   els.maskCanvas.width = w;
   els.maskCanvas.height = h;
-
   imgCtx.drawImage(img, 0, 0, w, h);
   originalImageData = imgCtx.getImageData(0, 0, w, h);
-
   maskCtx.clearRect(0, 0, w, h);
   maskHistory = [];
-
   els.downloadBtn.classList.add("hidden");
   els.processBtn.disabled = false;
 }
@@ -121,22 +140,32 @@ function getCanvasPoint(e) {
   const clientX = e.touches ? e.touches[0].clientX : e.clientX;
   const clientY = e.touches ? e.touches[0].clientY : e.clientY;
   return {
-    x: (clientX - rect.left) * scaleX,
-    y: (clientY - rect.top) * scaleY
+    x: Math.round((clientX - rect.left) * scaleX),
+    y: Math.round((clientY - rect.top) * scaleY)
   };
+}
+
+function pushHistory() {
+  maskHistory.push(maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height));
+  if (maskHistory.length > 20) maskHistory.shift();
 }
 
 function startDraw(e) {
   e.preventDefault();
-  drawing = true;
-  maskHistory.push(maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height));
-  if (maskHistory.length > 20) maskHistory.shift();
-  lastPoint = getCanvasPoint(e);
-  drawDot(lastPoint);
+  const p = getCanvasPoint(e);
+  if (currentTool === "brush") {
+    drawing = true;
+    pushHistory();
+    lastPoint = p;
+    drawDot(p);
+  } else if (currentTool === "wand") {
+    pushHistory();
+    magicWand(p.x, p.y);
+  }
 }
 
 function drawMove(e) {
-  if (!drawing) return;
+  if (!drawing || currentTool !== "brush") return;
   e.preventDefault();
   const p = getCanvasPoint(e);
   drawLine(lastPoint, p);
@@ -150,7 +179,7 @@ function endDraw() {
 
 function drawDot(p) {
   const size = parseInt(els.brushSize.value, 10);
-  maskCtx.fillStyle = "#ff3366";
+  maskCtx.fillStyle = `rgb(${MASK_COLOR.join(",")})`;
   maskCtx.beginPath();
   maskCtx.arc(p.x, p.y, size / 2, 0, Math.PI * 2);
   maskCtx.fill();
@@ -158,8 +187,7 @@ function drawDot(p) {
 
 function drawLine(a, b) {
   const size = parseInt(els.brushSize.value, 10);
-  maskCtx.strokeStyle = "#ff3366";
-  maskCtx.fillStyle = "#ff3366";
+  maskCtx.strokeStyle = `rgb(${MASK_COLOR.join(",")})`;
   maskCtx.lineWidth = size;
   maskCtx.lineCap = "round";
   maskCtx.lineJoin = "round";
@@ -177,7 +205,7 @@ els.maskCanvas.addEventListener("touchmove", drawMove, { passive: false });
 els.maskCanvas.addEventListener("touchend", endDraw);
 
 els.clearMaskBtn.addEventListener("click", () => {
-  maskHistory.push(maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height));
+  pushHistory();
   maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
 });
 
@@ -185,6 +213,79 @@ els.undoBtn.addEventListener("click", () => {
   if (maskHistory.length === 0) return;
   const prev = maskHistory.pop();
   maskCtx.putImageData(prev, 0, 0);
+});
+
+function colorDistance(r1, g1, b1, r2, g2, b2) {
+  const dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+
+function magicWand(sx, sy) {
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+  const imgData = imgCtx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+  const idx = (sy * w + sx) * 4;
+  const tr = data[idx], tg = data[idx + 1], tb = data[idx + 2];
+  const tolerance = parseInt(els.wandTolerance.value, 10);
+  const contiguous = els.wandContiguous.checked;
+
+  const maskData = maskCtx.getImageData(0, 0, w, h);
+  const md = maskData.data;
+  const [mr, mg, mb] = MASK_COLOR;
+
+  if (contiguous) {
+    const visited = new Uint8Array(w * h);
+    const stack = [[sx, sy]];
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      if (x < 0 || y < 0 || x >= w || y >= h) continue;
+      const pi = y * w + x;
+      if (visited[pi]) continue;
+      visited[pi] = 1;
+      const di = pi * 4;
+      const dist = colorDistance(data[di], data[di + 1], data[di + 2], tr, tg, tb);
+      if (dist > tolerance) continue;
+      md[di] = mr; md[di + 1] = mg; md[di + 2] = mb; md[di + 3] = 255;
+      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+  } else {
+    for (let i = 0; i < data.length; i += 4) {
+      const dist = colorDistance(data[i], data[i + 1], data[i + 2], tr, tg, tb);
+      if (dist <= tolerance) {
+        md[i] = mr; md[i + 1] = mg; md[i + 2] = mb; md[i + 3] = 255;
+      }
+    }
+  }
+  maskCtx.putImageData(maskData, 0, 0);
+}
+
+els.autoDetectBtn.addEventListener("click", () => {
+  pushHistory();
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+  const imgData = imgCtx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+  const hex = els.autoColor.value;
+  const tr = parseInt(hex.slice(1, 3), 16);
+  const tg = parseInt(hex.slice(3, 5), 16);
+  const tb = parseInt(hex.slice(5, 7), 16);
+  const tolerance = parseInt(els.autoTolerance.value, 10);
+
+  const maskData = maskCtx.getImageData(0, 0, w, h);
+  const md = maskData.data;
+  const [mr, mg, mb] = MASK_COLOR;
+  let matched = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const dist = colorDistance(data[i], data[i + 1], data[i + 2], tr, tg, tb);
+    if (dist <= tolerance) {
+      md[i] = mr; md[i + 1] = mg; md[i + 2] = mb; md[i + 3] = 255;
+      matched++;
+    }
+  }
+  maskCtx.putImageData(maskData, 0, 0);
+  setStatus(`סומנו ${matched.toLocaleString()} פיקסלים`, "success");
 });
 
 els.processBtn.addEventListener("click", processInpaint);
@@ -214,16 +315,15 @@ async function processInpaint() {
     return;
   }
   if (!maskHasContent()) {
-    setStatus("צבע על סימן המים עם המברשת", "error");
+    setStatus("סמן את סימן המים תחילה", "error");
     return;
   }
 
   els.processBtn.disabled = true;
   setStatus(`מעבד<span class="spinner"></span>`, "loading");
-
   await new Promise(r => setTimeout(r, 30));
 
-  let src = null, mask = null, dst = null;
+  let src = null, mask = null, dst = null, kernel = null;
   try {
     src = cv.imread(els.imgCanvas);
     cv.cvtColor(src, src, cv.COLOR_RGBA2RGB);
@@ -233,6 +333,13 @@ async function processInpaint() {
     const maskData = maskImageData.data;
     for (let i = 0, j = 0; i < maskData.length; i += 4, j++) {
       mask.data[j] = maskData[i + 3] > 0 ? 255 : 0;
+    }
+
+    const dilateAmount = parseInt(els.maskDilate.value, 10);
+    if (dilateAmount > 0) {
+      const ksize = dilateAmount * 2 + 1;
+      kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(ksize, ksize));
+      cv.dilate(mask, mask, kernel);
     }
 
     dst = new cv.Mat();
@@ -245,9 +352,8 @@ async function processInpaint() {
 
     maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
     maskHistory = [];
-
     els.downloadBtn.classList.remove("hidden");
-    setStatus("הושלם. ניתן לצבוע שוב לתיקון נוסף", "success");
+    setStatus("הושלם. ניתן לעבד שוב לתיקון נוסף", "success");
   } catch (err) {
     console.error(err);
     setStatus(`שגיאה: ${err.message || err}`, "error");
@@ -255,6 +361,7 @@ async function processInpaint() {
     if (src) src.delete();
     if (mask) mask.delete();
     if (dst) dst.delete();
+    if (kernel) kernel.delete();
     els.processBtn.disabled = false;
   }
 }

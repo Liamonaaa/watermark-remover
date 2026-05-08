@@ -29,11 +29,57 @@
   </section>
 
   <section class="editor hidden" id="editorSection">
-    <div class="toolbar">
+    <div class="tool-tabs">
+      <button class="tab active" data-tool="brush">🖌️ מברשת</button>
+      <button class="tab" data-tool="wand">✨ Magic Wand</button>
+      <button class="tab" data-tool="auto">🎯 זיהוי אוטומטי</button>
+    </div>
+
+    <div class="tool-panel" id="panel-brush">
+      <p class="instructions">צבע על סימן המים עם המברשת.</p>
       <div class="tool-group">
         <label>גודל מברשת</label>
-        <input type="range" id="brushSize" min="5" max="80" value="20">
+        <input type="range" id="brushSize" min="5" max="120" value="20">
         <span id="brushSizeVal">20</span>
+      </div>
+    </div>
+
+    <div class="tool-panel hidden" id="panel-wand">
+      <p class="instructions">לחץ על סימן המים — האתר יבחר אוטומטית פיקסלים דומים בצבע.</p>
+      <div class="tool-group">
+        <label>טולרנס צבע</label>
+        <input type="range" id="wandTolerance" min="5" max="80" value="25">
+        <span id="wandToleranceVal">25</span>
+      </div>
+      <div class="tool-group">
+        <label>
+          <input type="checkbox" id="wandContiguous" checked>
+          רק אזור מחובר
+        </label>
+      </div>
+    </div>
+
+    <div class="tool-panel hidden" id="panel-auto">
+      <p class="instructions">סורק את כל התמונה ומסמן פיקסלים אטומים בצבע ספציפי. בחר צבע סימן המים.</p>
+      <div class="tool-group">
+        <label>צבע מטרה</label>
+        <input type="color" id="autoColor" value="#ffffff">
+      </div>
+      <div class="tool-group">
+        <label>טולרנס</label>
+        <input type="range" id="autoTolerance" min="5" max="80" value="20">
+        <span id="autoToleranceVal">20</span>
+      </div>
+      <div class="tool-group">
+        <button id="autoDetectBtn" class="btn btn-secondary">סרוק וסמן</button>
+      </div>
+    </div>
+
+    <div class="common-controls">
+      <div class="tool-group">
+        <label>הרחבת מסכה</label>
+        <input type="range" id="maskDilate" min="0" max="20" value="3">
+        <span id="maskDilateVal">3</span>
       </div>
       <div class="tool-group">
         <label>רדיוס מילוי</label>
@@ -52,8 +98,6 @@
         <button id="undoBtn" class="btn btn-secondary">בטל</button>
       </div>
     </div>
-
-    <p class="instructions">צבע על סימן המים עם המברשת. לחץ "הסר" כשסיימת.</p>
 
     <div class="canvas-wrap">
       <canvas id="imgCanvas"></canvas>
