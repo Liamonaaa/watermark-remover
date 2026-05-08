@@ -80,75 +80,40 @@ label {
 .drop-content p { color: var(--text); }
 .drop-content .small { color: var(--text-dim); font-size: 0.85rem; margin-top: 0.25rem; }
 
-.tool-tabs {
-  display: flex;
-  gap: 0.5rem;
+.workflow {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
   margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
 
-.tab {
-  padding: 0.6rem 1rem;
-  background: var(--surface-2);
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.9rem;
-  font-weight: 600;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.tab:hover { color: var(--text); }
-
-.tab.active {
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
   background: var(--primary);
   color: white;
-  border-color: var(--primary);
+  font-weight: 700;
+  font-size: 0.9rem;
+  flex-shrink: 0;
 }
 
-.tool-panel {
-  background: var(--surface-2);
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-items: center;
-}
-
-.tool-panel .instructions {
-  width: 100%;
-  margin-bottom: 0.25rem;
-  text-align: right;
-}
-
-.common-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-items: center;
-  margin-bottom: 1rem;
-  padding: 1rem;
-  background: var(--surface-2);
-  border-radius: 8px;
-}
-
-input[type="color"] {
-  width: 48px;
-  height: 36px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  cursor: pointer;
-  padding: 2px;
-}
-
-input[type="checkbox"] {
-  accent-color: var(--primary);
-  margin-left: 0.4rem;
+.step-text {
+  color: var(--text);
+  font-size: 0.95rem;
 }
 
 .source-status {
@@ -157,8 +122,15 @@ input[type="checkbox"] {
   font-weight: 600;
 }
 
-.tool-group label input[type="checkbox"] {
-  vertical-align: middle;
+.controls-panel {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  align-items: center;
 }
 
 .tool-group {
@@ -179,21 +151,9 @@ input[type="checkbox"] {
   font-weight: 600;
 }
 
-select {
-  background: var(--surface-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
-  font-family: inherit;
-  font-size: 0.9rem;
-}
-
-.instructions {
-  font-size: 0.9rem;
-  color: var(--text-dim);
-  margin-bottom: 1rem;
-  text-align: center;
+input[type="checkbox"] {
+  accent-color: var(--primary);
+  margin-left: 0.4rem;
 }
 
 .canvas-wrap {
@@ -219,8 +179,8 @@ select {
 
 #maskCanvas {
   position: absolute;
-  cursor: crosshair;
-  opacity: 0.5;
+  cursor: pointer;
+  opacity: 0.7;
 }
 
 .actions {
@@ -258,7 +218,7 @@ select {
 }
 
 .btn-secondary {
-  background: var(--surface-2);
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
 }
@@ -306,6 +266,6 @@ footer .small { font-size: 0.75rem; margin-top: 0.25rem; opacity: 0.7; }
 @media (max-width: 640px) {
   h1 { font-size: 1.75rem; }
   .container { padding: 1rem; }
-  .toolbar { gap: 0.75rem; }
+  .controls-panel { gap: 0.75rem; }
   .tool-group input[type="range"] { width: 80px; }
 }

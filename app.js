@@ -5,152 +5,36 @@ const els = {
   fileInput: document.getElementById("fileInput"),
   imgCanvas: document.getElementById("imgCanvas"),
   maskCanvas: document.getElementById("maskCanvas"),
-  brushSize: document.getElementById("brushSize"),
-  brushSizeVal: document.getElementById("brushSizeVal"),
+  setSourceBtn: document.getElementById("setSourceBtn"),
+  sourceStatus: document.getElementById("sourceStatus"),
   wandTolerance: document.getElementById("wandTolerance"),
   wandToleranceVal: document.getElementById("wandToleranceVal"),
   wandContiguous: document.getElementById("wandContiguous"),
-  autoColor: document.getElementById("autoColor"),
-  autoTolerance: document.getElementById("autoTolerance"),
-  autoToleranceVal: document.getElementById("autoToleranceVal"),
-  autoDetectBtn: document.getElementById("autoDetectBtn"),
   maskDilate: document.getElementById("maskDilate"),
   maskDilateVal: document.getElementById("maskDilateVal"),
-  inpaintRadius: document.getElementById("inpaintRadius"),
-  inpaintRadiusVal: document.getElementById("inpaintRadiusVal"),
-  algo: document.getElementById("algo"),
-  clearMaskBtn: document.getElementById("clearMaskBtn"),
+  featherSize: document.getElementById("featherSize"),
+  featherSizeVal: document.getElementById("featherSizeVal"),
   undoBtn: document.getElementById("undoBtn"),
-  processBtn: document.getElementById("processBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
   resetBtn: document.getElementById("resetBtn"),
   status: document.getElementById("status"),
-  tabs: document.querySelectorAll(".tab"),
-  setSourceBtn: document.getElementById("setSourceBtn"),
-  sourceStatus: document.getElementById("sourceStatus"),
-  stampSize: document.getElementById("stampSize"),
-  stampSizeVal: document.getElementById("stampSizeVal"),
-  stampHardness: document.getElementById("stampHardness"),
-  stampHardnessVal: document.getElementById("stampHardnessVal"),
 };
 
 const imgCtx = els.imgCanvas.getContext("2d", { willReadFrequently: true });
 const maskCtx = els.maskCanvas.getContext("2d", { willReadFrequently: true });
 
-let cvReady = false;
-let originalImageData = null;
-let maskHistory = [];
-let drawing = false;
-let lastPoint = null;
-let currentTool = "brush";
+let stampSource = null;
+let stampPickMode = false;
+let imageHistory = [];
 const MASK_COLOR = [255, 51, 102];
-
-window.addEventListener("load", () => {
-  if (window.cv && window.cv.Mat) {
-    cvReady = true;
-  } else {
-    setStatus(`טוען OpenCV<span class="spinner"></span>`, "loading");
-    const check = setInterval(() => {
-      if (window.cv && window.cv.Mat) {
-        cvReady = true;
-        clearInterval(check);
-        clearStatus();
-      }
-    }, 200);
-  }
-});
+const HISTORY_LIMIT = 15;
 
 const bindRange = (input, label) => {
   input.addEventListener("input", () => { label.textContent = input.value; });
 };
-bindRange(els.brushSize, els.brushSizeVal);
 bindRange(els.wandTolerance, els.wandToleranceVal);
-bindRange(els.autoTolerance, els.autoToleranceVal);
 bindRange(els.maskDilate, els.maskDilateVal);
-bindRange(els.inpaintRadius, els.inpaintRadiusVal);
-bindRange(els.stampSize, els.stampSizeVal);
-bindRange(els.stampHardness, els.stampHardnessVal);
-
-let stampSource = null;
-let stampPickMode = false;
-let stampClickPoint = null;
-let imageHistory = [];
-
-els.setSourceBtn.addEventListener("click", () => {
-  stampPickMode = true;
-  els.sourceStatus.textContent = "לחץ על נקודה בתמונה...";
-  els.sourceStatus.style.color = "var(--primary)";
-  els.maskCanvas.style.cursor = "copy";
-});
-
-function pushImageHistory() {
-  const w = els.imgCanvas.width;
-  const h = els.imgCanvas.height;
-  imageHistory.push(imgCtx.getImageData(0, 0, w, h));
-  if (imageHistory.length > 10) imageHistory.shift();
-}
-
-function applyStamp(targetX, targetY) {
-  if (!stampSource || !stampClickPoint) return;
-  const size = parseInt(els.stampSize.value, 10);
-  const hardness = parseInt(els.stampHardness.value, 10) / 100;
-  const radius = size / 2;
-  const w = els.imgCanvas.width;
-  const h = els.imgCanvas.height;
-
-  const offsetX = stampSource.x - stampClickPoint.x;
-  const offsetY = stampSource.y - stampClickPoint.y;
-  const srcX = Math.round(targetX + offsetX);
-  const srcY = Math.round(targetY + offsetY);
-
-  const x0 = Math.max(0, Math.round(targetX - radius));
-  const y0 = Math.max(0, Math.round(targetY - radius));
-  const x1 = Math.min(w, Math.round(targetX + radius));
-  const y1 = Math.min(h, Math.round(targetY + radius));
-  if (x1 <= x0 || y1 <= y0) return;
-
-  const tw = x1 - x0;
-  const th = y1 - y0;
-
-  const sx0 = srcX - (Math.round(targetX) - x0);
-  const sy0 = srcY - (Math.round(targetY) - y0);
-  if (sx0 < 0 || sy0 < 0 || sx0 + tw > w || sy0 + th > h) return;
-
-  const target = imgCtx.getImageData(x0, y0, tw, th);
-  const source = imgCtx.getImageData(sx0, sy0, tw, th);
-  const td = target.data;
-  const sd = source.data;
-
-  for (let yy = 0; yy < th; yy++) {
-    for (let xx = 0; xx < tw; xx++) {
-      const dx = (x0 + xx) - targetX;
-      const dy = (y0 + yy) - targetY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > radius) continue;
-      const t = dist / radius;
-      const falloff = t < hardness ? 1 : Math.pow(1 - (t - hardness) / (1 - hardness + 0.0001), 2);
-      const alpha = Math.max(0, Math.min(1, falloff));
-      const i = (yy * tw + xx) * 4;
-      td[i]     = sd[i]     * alpha + td[i]     * (1 - alpha);
-      td[i + 1] = sd[i + 1] * alpha + td[i + 1] * (1 - alpha);
-      td[i + 2] = sd[i + 2] * alpha + td[i + 2] * (1 - alpha);
-    }
-  }
-  imgCtx.putImageData(target, x0, y0);
-}
-
-els.tabs.forEach(tab => {
-  tab.addEventListener("click", () => {
-    els.tabs.forEach(t => t.classList.remove("active"));
-    tab.classList.add("active");
-    currentTool = tab.dataset.tool;
-    document.querySelectorAll(".tool-panel").forEach(p => p.classList.add("hidden"));
-    document.getElementById(`panel-${currentTool}`).classList.remove("hidden");
-    if (currentTool === "brush") els.maskCanvas.style.cursor = "crosshair";
-    else if (currentTool === "stamp") els.maskCanvas.style.cursor = stampSource ? "crosshair" : "pointer";
-    else els.maskCanvas.style.cursor = "pointer";
-  });
-});
+bindRange(els.featherSize, els.featherSizeVal);
 
 els.dropZone.addEventListener("click", () => els.fileInput.click());
 els.dropZone.addEventListener("dragover", (e) => {
@@ -204,11 +88,14 @@ function setupCanvas(img) {
   els.maskCanvas.width = w;
   els.maskCanvas.height = h;
   imgCtx.drawImage(img, 0, 0, w, h);
-  originalImageData = imgCtx.getImageData(0, 0, w, h);
   maskCtx.clearRect(0, 0, w, h);
-  maskHistory = [];
+  imageHistory = [];
+  stampSource = null;
+  stampPickMode = false;
+  els.sourceStatus.textContent = "לא נבחר מקור";
+  els.sourceStatus.style.color = "";
+  els.maskCanvas.style.cursor = "pointer";
   els.downloadBtn.classList.add("hidden");
-  els.processBtn.disabled = false;
 }
 
 function getCanvasPoint(e) {
@@ -223,108 +110,18 @@ function getCanvasPoint(e) {
   };
 }
 
-function pushHistory() {
-  maskHistory.push(maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height));
-  if (maskHistory.length > 20) maskHistory.shift();
+function pushImageHistory() {
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+  imageHistory.push(imgCtx.getImageData(0, 0, w, h));
+  if (imageHistory.length > HISTORY_LIMIT) imageHistory.shift();
 }
 
-function startDraw(e) {
-  e.preventDefault();
-  const p = getCanvasPoint(e);
-  if (currentTool === "brush") {
-    drawing = true;
-    pushHistory();
-    lastPoint = p;
-    drawDot(p);
-  } else if (currentTool === "wand") {
-    pushHistory();
-    magicWand(p.x, p.y);
-  } else if (currentTool === "stamp") {
-    if (stampPickMode) {
-      stampSource = { x: p.x, y: p.y };
-      stampPickMode = false;
-      els.sourceStatus.textContent = `מקור: (${p.x}, ${p.y})`;
-      els.sourceStatus.style.color = "var(--success)";
-      els.maskCanvas.style.cursor = "crosshair";
-      return;
-    }
-    if (!stampSource) {
-      setStatus("בחר מקור תחילה", "error");
-      return;
-    }
-    drawing = true;
-    pushImageHistory();
-    stampClickPoint = { x: p.x, y: p.y };
-    lastPoint = p;
-    applyStamp(p.x, p.y);
-  }
-}
-
-function drawMove(e) {
-  if (!drawing) return;
-  e.preventDefault();
-  const p = getCanvasPoint(e);
-  if (currentTool === "brush") {
-    drawLine(lastPoint, p);
-    lastPoint = p;
-  } else if (currentTool === "stamp") {
-    const steps = Math.max(1, Math.round(Math.hypot(p.x - lastPoint.x, p.y - lastPoint.y) / 2));
-    for (let i = 1; i <= steps; i++) {
-      const ix = lastPoint.x + (p.x - lastPoint.x) * (i / steps);
-      const iy = lastPoint.y + (p.y - lastPoint.y) * (i / steps);
-      applyStamp(ix, iy);
-    }
-    lastPoint = p;
-  }
-}
-
-function endDraw() {
-  drawing = false;
-  lastPoint = null;
-}
-
-function drawDot(p) {
-  const size = parseInt(els.brushSize.value, 10);
-  maskCtx.fillStyle = `rgb(${MASK_COLOR.join(",")})`;
-  maskCtx.beginPath();
-  maskCtx.arc(p.x, p.y, size / 2, 0, Math.PI * 2);
-  maskCtx.fill();
-}
-
-function drawLine(a, b) {
-  const size = parseInt(els.brushSize.value, 10);
-  maskCtx.strokeStyle = `rgb(${MASK_COLOR.join(",")})`;
-  maskCtx.lineWidth = size;
-  maskCtx.lineCap = "round";
-  maskCtx.lineJoin = "round";
-  maskCtx.beginPath();
-  maskCtx.moveTo(a.x, a.y);
-  maskCtx.lineTo(b.x, b.y);
-  maskCtx.stroke();
-}
-
-els.maskCanvas.addEventListener("mousedown", startDraw);
-els.maskCanvas.addEventListener("mousemove", drawMove);
-window.addEventListener("mouseup", endDraw);
-els.maskCanvas.addEventListener("touchstart", startDraw, { passive: false });
-els.maskCanvas.addEventListener("touchmove", drawMove, { passive: false });
-els.maskCanvas.addEventListener("touchend", endDraw);
-
-els.clearMaskBtn.addEventListener("click", () => {
-  pushHistory();
-  maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
-});
-
-els.undoBtn.addEventListener("click", () => {
-  if (currentTool === "stamp") {
-    if (imageHistory.length === 0) return;
-    const prev = imageHistory.pop();
-    imgCtx.putImageData(prev, 0, 0);
-    return;
-  }
-  if (maskHistory.length === 0) return;
-  const prev = maskHistory.pop();
-  maskCtx.putImageData(prev, 0, 0);
+els.setSourceBtn.addEventListener("click", () => {
+  stampPickMode = true;
+  els.sourceStatus.textContent = "לחץ על אזור נקי בתמונה...";
+  els.sourceStatus.style.color = "var(--primary)";
+  els.maskCanvas.style.cursor = "copy";
 });
 
 function colorDistance(r1, g1, b1, r2, g2, b2) {
@@ -332,7 +129,7 @@ function colorDistance(r1, g1, b1, r2, g2, b2) {
   return Math.sqrt(dr * dr + dg * dg + db * db);
 }
 
-function magicWand(sx, sy) {
+function buildWandMask(sx, sy) {
   const w = els.imgCanvas.width;
   const h = els.imgCanvas.height;
   const imgData = imgCtx.getImageData(0, 0, w, h);
@@ -342,9 +139,7 @@ function magicWand(sx, sy) {
   const tolerance = parseInt(els.wandTolerance.value, 10);
   const contiguous = els.wandContiguous.checked;
 
-  const maskData = maskCtx.getImageData(0, 0, w, h);
-  const md = maskData.data;
-  const [mr, mg, mb] = MASK_COLOR;
+  const mask = new Uint8Array(w * h);
 
   if (contiguous) {
     const visited = new Uint8Array(w * h);
@@ -358,49 +153,200 @@ function magicWand(sx, sy) {
       const di = pi * 4;
       const dist = colorDistance(data[di], data[di + 1], data[di + 2], tr, tg, tb);
       if (dist > tolerance) continue;
-      md[di] = mr; md[di + 1] = mg; md[di + 2] = mb; md[di + 3] = 255;
+      mask[pi] = 255;
       stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
     }
   } else {
-    for (let i = 0; i < data.length; i += 4) {
+    for (let i = 0, j = 0; i < data.length; i += 4, j++) {
       const dist = colorDistance(data[i], data[i + 1], data[i + 2], tr, tg, tb);
-      if (dist <= tolerance) {
-        md[i] = mr; md[i + 1] = mg; md[i + 2] = mb; md[i + 3] = 255;
-      }
+      if (dist <= tolerance) mask[j] = 255;
     }
   }
-  maskCtx.putImageData(maskData, 0, 0);
+  return mask;
 }
 
-els.autoDetectBtn.addEventListener("click", () => {
-  pushHistory();
-  const w = els.imgCanvas.width;
-  const h = els.imgCanvas.height;
-  const imgData = imgCtx.getImageData(0, 0, w, h);
-  const data = imgData.data;
-  const hex = els.autoColor.value;
-  const tr = parseInt(hex.slice(1, 3), 16);
-  const tg = parseInt(hex.slice(3, 5), 16);
-  const tb = parseInt(hex.slice(5, 7), 16);
-  const tolerance = parseInt(els.autoTolerance.value, 10);
+function dilateMask(mask, w, h, radius) {
+  if (radius <= 0) return mask;
+  let cur = mask;
+  for (let r = 0; r < radius; r++) {
+    const next = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (cur[i]) { next[i] = 255; continue; }
+        if (
+          (x > 0 && cur[i - 1]) ||
+          (x < w - 1 && cur[i + 1]) ||
+          (y > 0 && cur[i - w]) ||
+          (y < h - 1 && cur[i + w])
+        ) {
+          next[i] = 255;
+        }
+      }
+    }
+    cur = next;
+  }
+  return cur;
+}
 
-  const maskData = maskCtx.getImageData(0, 0, w, h);
-  const md = maskData.data;
-  const [mr, mg, mb] = MASK_COLOR;
-  let matched = 0;
+function featherMask(mask, w, h, radius) {
+  if (radius <= 0) {
+    const out = new Float32Array(w * h);
+    for (let i = 0; i < mask.length; i++) out[i] = mask[i] / 255;
+    return out;
+  }
+  const dist = new Float32Array(w * h);
+  for (let i = 0; i < mask.length; i++) dist[i] = mask[i] ? 0 : Infinity;
 
-  for (let i = 0; i < data.length; i += 4) {
-    const dist = colorDistance(data[i], data[i + 1], data[i + 2], tr, tg, tb);
-    if (dist <= tolerance) {
-      md[i] = mr; md[i + 1] = mg; md[i + 2] = mb; md[i + 3] = 255;
-      matched++;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (dist[i] === 0) continue;
+      let d = dist[i];
+      if (x > 0) d = Math.min(d, dist[i - 1] + 1);
+      if (y > 0) d = Math.min(d, dist[i - w] + 1);
+      if (x > 0 && y > 0) d = Math.min(d, dist[i - w - 1] + 1.41421356);
+      if (x < w - 1 && y > 0) d = Math.min(d, dist[i - w + 1] + 1.41421356);
+      dist[i] = d;
     }
   }
-  maskCtx.putImageData(maskData, 0, 0);
-  setStatus(`סומנו ${matched.toLocaleString()} פיקסלים`, "success");
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = w - 1; x >= 0; x--) {
+      const i = y * w + x;
+      let d = dist[i];
+      if (x < w - 1) d = Math.min(d, dist[i + 1] + 1);
+      if (y < h - 1) d = Math.min(d, dist[i + w] + 1);
+      if (x < w - 1 && y < h - 1) d = Math.min(d, dist[i + w + 1] + 1.41421356);
+      if (x > 0 && y < h - 1) d = Math.min(d, dist[i + w - 1] + 1.41421356);
+      dist[i] = d;
+    }
+  }
+
+  const alpha = new Float32Array(w * h);
+  for (let i = 0; i < mask.length; i++) {
+    if (mask[i]) {
+      alpha[i] = 1;
+    } else if (dist[i] >= radius) {
+      alpha[i] = 0;
+    } else {
+      const t = 1 - dist[i] / radius;
+      alpha[i] = t * t * (3 - 2 * t);
+    }
+  }
+  return alpha;
+}
+
+function showMaskPreview(mask, w, h) {
+  const out = maskCtx.createImageData(w, h);
+  const od = out.data;
+  const [mr, mg, mb] = MASK_COLOR;
+  for (let i = 0, j = 0; i < mask.length; i++, j += 4) {
+    if (mask[i]) {
+      od[j] = mr; od[j + 1] = mg; od[j + 2] = mb; od[j + 3] = 180;
+    }
+  }
+  maskCtx.putImageData(out, 0, 0);
+}
+
+function applyCloneFill(mask, alpha, clickPoint) {
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+  const offsetX = stampSource.x - clickPoint.x;
+  const offsetY = stampSource.y - clickPoint.y;
+
+  const imgData = imgCtx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+  const srcCopy = new Uint8ClampedArray(d);
+
+  let painted = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const a = alpha[i];
+      if (a <= 0) continue;
+      const sx = x + offsetX;
+      const sy = y + offsetY;
+      if (sx < 0 || sy < 0 || sx >= w || sy >= h) continue;
+      const di = i * 4;
+      const si = (sy * w + sx) * 4;
+      d[di]     = srcCopy[si]     * a + d[di]     * (1 - a);
+      d[di + 1] = srcCopy[si + 1] * a + d[di + 1] * (1 - a);
+      d[di + 2] = srcCopy[si + 2] * a + d[di + 2] * (1 - a);
+      painted++;
+    }
+  }
+  imgCtx.putImageData(imgData, 0, 0);
+  return painted;
+}
+
+els.maskCanvas.addEventListener("click", (e) => {
+  const p = getCanvasPoint(e);
+
+  if (stampPickMode) {
+    stampSource = { x: p.x, y: p.y };
+    stampPickMode = false;
+    els.sourceStatus.textContent = `מקור: (${p.x}, ${p.y})`;
+    els.sourceStatus.style.color = "var(--success)";
+    els.maskCanvas.style.cursor = "pointer";
+
+    const w = els.imgCanvas.width;
+    const h = els.imgCanvas.height;
+    maskCtx.clearRect(0, 0, w, h);
+    maskCtx.fillStyle = "rgba(74, 222, 128, 0.9)";
+    maskCtx.beginPath();
+    maskCtx.arc(p.x, p.y, 12, 0, Math.PI * 2);
+    maskCtx.fill();
+    maskCtx.strokeStyle = "white";
+    maskCtx.lineWidth = 2;
+    maskCtx.stroke();
+    setTimeout(() => {
+      maskCtx.clearRect(0, 0, w, h);
+    }, 1500);
+    return;
+  }
+
+  if (!stampSource) {
+    setStatus("בחר אזור מקור תחילה (שלב 1)", "error");
+    return;
+  }
+
+  const w = els.imgCanvas.width;
+  const h = els.imgCanvas.height;
+
+  let mask = buildWandMask(p.x, p.y);
+  let count = 0;
+  for (let i = 0; i < mask.length; i++) if (mask[i]) count++;
+  if (count === 0) {
+    setStatus("לא זוהה אזור — נסה להגדיל טולרנס", "error");
+    return;
+  }
+
+  const dilateAmount = parseInt(els.maskDilate.value, 10);
+  mask = dilateMask(mask, w, h, dilateAmount);
+
+  const featherAmount = parseInt(els.featherSize.value, 10);
+  const alpha = featherMask(mask, w, h, featherAmount);
+
+  showMaskPreview(mask, w, h);
+
+  setTimeout(() => {
+    pushImageHistory();
+    const painted = applyCloneFill(mask, alpha, p);
+    maskCtx.clearRect(0, 0, w, h);
+    els.downloadBtn.classList.remove("hidden");
+    setStatus(`הוסר אזור של ${painted.toLocaleString()} פיקסלים`, "success");
+  }, 120);
 });
 
-els.processBtn.addEventListener("click", processInpaint);
+els.undoBtn.addEventListener("click", () => {
+  if (imageHistory.length === 0) {
+    setStatus("אין צעד לבטל", "error");
+    return;
+  }
+  const prev = imageHistory.pop();
+  imgCtx.putImageData(prev, 0, 0);
+  setStatus("בוטל", "success");
+});
 
 els.resetBtn.addEventListener("click", () => {
   els.uploadSection.classList.remove("hidden");
@@ -408,81 +354,13 @@ els.resetBtn.addEventListener("click", () => {
   els.fileInput.value = "";
   imgCtx.clearRect(0, 0, els.imgCanvas.width, els.imgCanvas.height);
   maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
-  maskHistory = [];
   imageHistory = [];
   stampSource = null;
   stampPickMode = false;
   els.sourceStatus.textContent = "לא נבחר מקור";
   els.sourceStatus.style.color = "";
-  originalImageData = null;
   clearStatus();
 });
-
-function maskHasContent() {
-  const data = maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height).data;
-  for (let i = 3; i < data.length; i += 4) {
-    if (data[i] > 0) return true;
-  }
-  return false;
-}
-
-async function processInpaint() {
-  if (!cvReady) {
-    setStatus("OpenCV עדיין נטען, נסה שוב בעוד רגע", "error");
-    return;
-  }
-  if (!maskHasContent()) {
-    setStatus("סמן את סימן המים תחילה", "error");
-    return;
-  }
-
-  els.processBtn.disabled = true;
-  setStatus(`מעבד<span class="spinner"></span>`, "loading");
-  await new Promise(r => setTimeout(r, 30));
-
-  let src = null, mask = null, dst = null, kernel = null;
-  try {
-    src = cv.imread(els.imgCanvas);
-    cv.cvtColor(src, src, cv.COLOR_RGBA2RGB);
-
-    const maskImageData = maskCtx.getImageData(0, 0, els.maskCanvas.width, els.maskCanvas.height);
-    mask = new cv.Mat(maskImageData.height, maskImageData.width, cv.CV_8UC1);
-    const maskData = maskImageData.data;
-    for (let i = 0, j = 0; i < maskData.length; i += 4, j++) {
-      mask.data[j] = maskData[i + 3] > 0 ? 255 : 0;
-    }
-
-    const dilateAmount = parseInt(els.maskDilate.value, 10);
-    if (dilateAmount > 0) {
-      const ksize = dilateAmount * 2 + 1;
-      kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(ksize, ksize));
-      cv.dilate(mask, mask, kernel);
-    }
-
-    dst = new cv.Mat();
-    const radius = parseInt(els.inpaintRadius.value, 10);
-    const flag = els.algo.value === "ns" ? cv.INPAINT_NS : cv.INPAINT_TELEA;
-    cv.inpaint(src, mask, dst, radius, flag);
-
-    cv.cvtColor(dst, dst, cv.COLOR_RGB2RGBA);
-    pushImageHistory();
-    cv.imshow(els.imgCanvas, dst);
-
-    maskCtx.clearRect(0, 0, els.maskCanvas.width, els.maskCanvas.height);
-    maskHistory = [];
-    els.downloadBtn.classList.remove("hidden");
-    setStatus("הושלם. ניתן לעבד שוב לתיקון נוסף", "success");
-  } catch (err) {
-    console.error(err);
-    setStatus(`שגיאה: ${err.message || err}`, "error");
-  } finally {
-    if (src) src.delete();
-    if (mask) mask.delete();
-    if (dst) dst.delete();
-    if (kernel) kernel.delete();
-    els.processBtn.disabled = false;
-  }
-}
 
 els.downloadBtn.addEventListener("click", () => {
   els.imgCanvas.toBlob((blob) => {

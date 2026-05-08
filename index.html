@@ -29,28 +29,33 @@
   </section>
 
   <section class="editor hidden" id="editorSection">
-    <div class="tool-tabs">
-      <button class="tab active" data-tool="brush">🖌️ מברשת</button>
-      <button class="tab" data-tool="wand">✨ Magic Wand</button>
-      <button class="tab" data-tool="auto">🎯 זיהוי אוטומטי</button>
-      <button class="tab" data-tool="stamp">🎨 שיבוט (Clone Stamp)</button>
-    </div>
-
-    <div class="tool-panel" id="panel-brush">
-      <p class="instructions">צבע על סימן המים עם המברשת.</p>
-      <div class="tool-group">
-        <label>גודל מברשת</label>
-        <input type="range" id="brushSize" min="5" max="120" value="20">
-        <span id="brushSizeVal">20</span>
+    <div class="workflow">
+      <div class="step">
+        <span class="step-num">1</span>
+        <button id="setSourceBtn" class="btn btn-secondary">סמן אזור מקור נקי</button>
+        <span id="sourceStatus" class="source-status">לא נבחר מקור</span>
+      </div>
+      <div class="step">
+        <span class="step-num">2</span>
+        <span class="step-text">לחץ על סימן המים בתמונה — האתר יזהה ויסיר אותו אוטומטית</span>
       </div>
     </div>
 
-    <div class="tool-panel hidden" id="panel-wand">
-      <p class="instructions">לחץ על סימן המים — האתר יבחר אוטומטית פיקסלים דומים בצבע.</p>
+    <div class="controls-panel">
       <div class="tool-group">
-        <label>טולרנס צבע</label>
+        <label>טולרנס זיהוי</label>
         <input type="range" id="wandTolerance" min="5" max="80" value="25">
         <span id="wandToleranceVal">25</span>
+      </div>
+      <div class="tool-group">
+        <label>הרחבת אזור</label>
+        <input type="range" id="maskDilate" min="0" max="20" value="3">
+        <span id="maskDilateVal">3</span>
+      </div>
+      <div class="tool-group">
+        <label>ריכוך קצוות</label>
+        <input type="range" id="featherSize" min="0" max="20" value="5">
+        <span id="featherSizeVal">5</span>
       </div>
       <div class="tool-group">
         <label>
@@ -58,65 +63,7 @@
           רק אזור מחובר
         </label>
       </div>
-    </div>
-
-    <div class="tool-panel hidden" id="panel-stamp">
-      <p class="instructions">
-        1. לחץ "סמן מקור" ולחץ על אזור נקי בתמונה.
-        2. צייר על הטשטוש — הפיקסלים מהמקור יועתקו לשם.
-      </p>
       <div class="tool-group">
-        <button id="setSourceBtn" class="btn btn-secondary">סמן מקור</button>
-        <span id="sourceStatus" class="source-status">לא נבחר מקור</span>
-      </div>
-      <div class="tool-group">
-        <label>גודל מברשת</label>
-        <input type="range" id="stampSize" min="5" max="120" value="30">
-        <span id="stampSizeVal">30</span>
-      </div>
-      <div class="tool-group">
-        <label>קשיות</label>
-        <input type="range" id="stampHardness" min="0" max="100" value="80">
-        <span id="stampHardnessVal">80</span>
-      </div>
-    </div>
-
-    <div class="tool-panel hidden" id="panel-auto">
-      <p class="instructions">סורק את כל התמונה ומסמן פיקסלים אטומים בצבע ספציפי. בחר צבע סימן המים.</p>
-      <div class="tool-group">
-        <label>צבע מטרה</label>
-        <input type="color" id="autoColor" value="#ffffff">
-      </div>
-      <div class="tool-group">
-        <label>טולרנס</label>
-        <input type="range" id="autoTolerance" min="5" max="80" value="20">
-        <span id="autoToleranceVal">20</span>
-      </div>
-      <div class="tool-group">
-        <button id="autoDetectBtn" class="btn btn-secondary">סרוק וסמן</button>
-      </div>
-    </div>
-
-    <div class="common-controls">
-      <div class="tool-group">
-        <label>הרחבת מסכה</label>
-        <input type="range" id="maskDilate" min="0" max="20" value="3">
-        <span id="maskDilateVal">3</span>
-      </div>
-      <div class="tool-group">
-        <label>רדיוס מילוי</label>
-        <input type="range" id="inpaintRadius" min="3" max="20" value="5">
-        <span id="inpaintRadiusVal">5</span>
-      </div>
-      <div class="tool-group">
-        <label>אלגוריתם</label>
-        <select id="algo">
-          <option value="telea">Telea (מהיר)</option>
-          <option value="ns">Navier-Stokes (איכותי)</option>
-        </select>
-      </div>
-      <div class="tool-group">
-        <button id="clearMaskBtn" class="btn btn-secondary">נקה מסכה</button>
         <button id="undoBtn" class="btn btn-secondary">בטל</button>
       </div>
     </div>
@@ -127,7 +74,6 @@
     </div>
 
     <div class="actions">
-      <button id="processBtn" class="btn btn-primary">הסר סימן מים</button>
       <button id="downloadBtn" class="btn btn-primary hidden">הורד תוצאה</button>
       <button id="resetBtn" class="btn btn-secondary">תמונה חדשה</button>
     </div>
@@ -137,11 +83,10 @@
 
   <footer>
     <p>שימוש בתמונות שלך בלבד. הסרת סימני מים מתוכן זר עלולה להפר זכויות יוצרים.</p>
-    <p class="small">מבוסס על OpenCV.js · ללא העלאה לשרת</p>
+    <p class="small">Magic Wand + Clone Stamp · ללא העלאה לשרת</p>
   </footer>
 </div>
 
-<script async src="https://docs.opencv.org/4.x/opencv.js" id="opencvScript"></script>
 <script src="app.js"></script>
 </body>
 </html>
