@@ -23,7 +23,18 @@ const els = {
   loadProgress: document.getElementById("loadProgress"),
   progressFill: document.getElementById("progressFill"),
   progressText: document.getElementById("progressText"),
+  aiOverlay: document.getElementById("aiOverlay"),
+  aiOverlaySub: document.getElementById("aiOverlaySub"),
 };
+
+function showAiOverlay(sub) {
+  if (sub) els.aiOverlaySub.textContent = sub;
+  els.aiOverlay.classList.remove("hidden");
+}
+
+function hideAiOverlay() {
+  els.aiOverlay.classList.add("hidden");
+}
 
 const imgCtx = els.imgCanvas.getContext("2d", { willReadFrequently: true });
 const maskCtx = els.maskCanvas.getContext("2d", { willReadFrequently: true });
@@ -608,8 +619,9 @@ els.removeBtn.addEventListener("click", async () => {
   const alpha = featherMask(mask, w, h, featherAmount);
 
   els.removeBtn.disabled = true;
+  showAiOverlay(`מעבד אזור של ${count.toLocaleString()} פיקסלים...`);
   setStatus(`AI מעבד<span class="spinner"></span>`, "loading");
-  await new Promise(r => setTimeout(r, 30));
+  await new Promise(r => setTimeout(r, 50));
 
   try {
     const inpainted = await inpaintWithLama(mask);
@@ -625,6 +637,8 @@ els.removeBtn.addEventListener("click", async () => {
     console.error(err);
     setStatus(`שגיאת AI: ${err.message}`, "error");
     els.removeBtn.disabled = false;
+  } finally {
+    hideAiOverlay();
   }
 });
 
