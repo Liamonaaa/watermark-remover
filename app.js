@@ -18,29 +18,14 @@ const els = {
   downloadBtn: document.getElementById("downloadBtn"),
   resetBtn: document.getElementById("resetBtn"),
   status: document.getElementById("status"),
+  loadLamaBtn: document.getElementById("loadLamaBtn"),
   aiStatus: document.getElementById("aiStatus"),
+  loadProgress: document.getElementById("loadProgress"),
+  progressFill: document.getElementById("progressFill"),
+  progressText: document.getElementById("progressText"),
   aiOverlay: document.getElementById("aiOverlay"),
   aiOverlaySub: document.getElementById("aiOverlaySub"),
 };
-
-const GEMINI_MODEL = "gemini-2.5-flash-image";
-const GEMINI_KEY_STORAGE = "gemini_api_key";
-
-function getGeminiKey() {
-  let key = localStorage.getItem(GEMINI_KEY_STORAGE);
-  if (!key) {
-    key = prompt("הכנס Gemini API key (נשמר מקומית בדפדפן):");
-    if (key) {
-      key = key.trim();
-      localStorage.setItem(GEMINI_KEY_STORAGE, key);
-    }
-  }
-  return key;
-}
-
-function geminiUrl(key) {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
-}
 
 function showAiOverlay(sub) {
   if (sub) els.aiOverlaySub.textContent = sub;
@@ -60,6 +45,13 @@ let isDragging = false;
 let lastWandPos = null;
 const MASK_COLOR = [255, 51, 102];
 const HISTORY_LIMIT = 15;
+
+let lamaSession = null;
+let lamaLoading = false;
+const LAMA_MODEL_URL = "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx";
+const ORT_VERSION = "1.18.0";
+const ORT_SCRIPT = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/ort.min.js`;
+const ORT_WASM_PATH = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
 
 const bindRange = (input, label) => {
   input.addEventListener("input", () => { label.textContent = input.value; });
@@ -324,138 +316,220 @@ function addWandAt(x, y) {
   return added;
 }
 
-// ---------- Gemini inpaint ----------
-
-function canvasToBase64Png(canvas) {
-  // Returns base64 (no prefix)
-  const dataUrl = canvas.toDataURL("image/png");
-  return dataUrl.split(",")[1];
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error(`failed to load ${src}`));
+    document.head.appendChild(s);
+  });
 }
 
-function buildMaskedImage(maskU8, w, h) {
-  // Composite: original image with bright magenta highlight on masked pixels,
-  // so Gemini can see exactly which area to replace.
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const cx = c.getContext("2d");
-  cx.drawImage(els.imgCanvas, 0, 0);
-  const imgData = cx.getImageData(0, 0, w, h);
-  const d = imgData.data;
-  for (let i = 0, j = 0; i < maskU8.length; i++, j += 4) {
-    if (maskU8[i]) {
-      // Solid magenta marker
-      d[j]     = 255;
-      d[j + 1] = 0;
-      d[j + 2] = 255;
-      d[j + 3] = 255;
+async function fetchModelWithProgress(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} בהורדת המודל`);
+  const total = parseInt(res.headers.get("content-length") || "0", 10);
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (total > 0) {
+      const pct = Math.round((received / total) * 100);
+      els.progressFill.style.width = `${pct}%`;
+      els.progressText.textContent = `${pct}% (${(received / 1048576).toFixed(1)}MB)`;
+    } else {
+      els.progressText.textContent = `${(received / 1048576).toFixed(1)}MB`;
     }
   }
-  cx.putImageData(imgData, 0, 0);
-  return c;
+  const buf = new Uint8Array(received);
+  let pos = 0;
+  for (const c of chunks) { buf.set(c, pos); pos += c.length; }
+  return buf.buffer;
 }
 
-function buildMaskOnlyImage(maskU8, w, h) {
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const cx = c.getContext("2d");
-  const imgData = cx.createImageData(w, h);
-  const d = imgData.data;
-  for (let i = 0, j = 0; i < maskU8.length; i++, j += 4) {
-    const v = maskU8[i] ? 255 : 0;
-    d[j] = v; d[j + 1] = v; d[j + 2] = v; d[j + 3] = 255;
+els.loadLamaBtn.addEventListener("click", loadLama);
+
+async function loadLama() {
+  if (lamaSession || lamaLoading) return;
+  lamaLoading = true;
+  els.loadLamaBtn.disabled = true;
+  els.aiStatus.textContent = "טוען...";
+  els.aiStatus.className = "ai-status loading";
+  els.loadProgress.classList.remove("hidden");
+  els.progressText.textContent = "טוען ONNX runtime...";
+
+  try {
+    await loadScript(ORT_SCRIPT);
+    if (!window.ort) throw new Error("ONNX runtime לא נטען");
+    ort.env.wasm.wasmPaths = ORT_WASM_PATH;
+
+    els.progressText.textContent = "מוריד מודל LaMa...";
+    const modelBuf = await fetchModelWithProgress(LAMA_MODEL_URL);
+
+    els.progressText.textContent = "מאתחל מודל...";
+    let providers = ["wasm"];
+    try {
+      if (navigator.gpu) providers = ["webgpu", "wasm"];
+    } catch {}
+
+    lamaSession = await ort.InferenceSession.create(modelBuf, {
+      executionProviders: providers,
+      graphOptimizationLevel: "all"
+    });
+
+    els.aiStatus.textContent = "מוכן ✓";
+    els.aiStatus.className = "ai-status ready";
+    els.loadLamaBtn.textContent = "✓ מודל נטען";
+    els.loadProgress.classList.add("hidden");
+    setStatus("מודל LaMa מוכן. סמן את סימן המים ולחץ הסר", "success");
+  } catch (err) {
+    console.error(err);
+    els.aiStatus.textContent = "כשל בטעינה";
+    els.aiStatus.className = "ai-status error";
+    els.loadLamaBtn.disabled = false;
+    setStatus(`שגיאה: ${err.message}`, "error");
+    els.loadProgress.classList.add("hidden");
+  } finally {
+    lamaLoading = false;
   }
-  cx.putImageData(imgData, 0, 0);
-  return c;
 }
 
-async function inpaintWithGemini(maskU8) {
-  const key = getGeminiKey();
-  if (!key) throw new Error("חסר API key");
+const LAMA_SIZE = 512;
 
+function maskBoundingBox(maskU8, w, h) {
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (maskU8[y * w + x]) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+async function inpaintWithLama(maskU8) {
   const W = els.imgCanvas.width;
   const H = els.imgCanvas.height;
+  const S = LAMA_SIZE;
+  const plane = S * S;
 
-  const originalB64 = canvasToBase64Png(els.imgCanvas);
-  const maskedCanvas = buildMaskedImage(maskU8, W, H);
-  const maskedB64 = canvasToBase64Png(maskedCanvas);
+  const bbox = maskBoundingBox(maskU8, W, H);
+  if (!bbox) throw new Error("מסכה ריקה");
 
-  const prompt = `You are an expert photo editor. The SECOND image shows the FIRST image with a solid bright magenta (#FF00FF) overlay marking a watermark/logo/text that must be removed.
+  const margin = Math.max(64, Math.round(Math.max(bbox.w, bbox.h) * 1.5));
+  let cropX = Math.max(0, bbox.x - margin);
+  let cropY = Math.max(0, bbox.y - margin);
+  let cropEndX = Math.min(W, bbox.x + bbox.w + margin);
+  let cropEndY = Math.min(H, bbox.y + bbox.h + margin);
+  let cropW = cropEndX - cropX;
+  let cropH = cropEndY - cropY;
 
-Task: Output the FIRST image with EXACTLY that magenta-marked region removed and seamlessly inpainted to match the surrounding pixels (textures, lighting, shadows, gradients).
+  const sideMax = Math.max(cropW, cropH);
+  const padW = sideMax - cropW;
+  const padH = sideMax - cropH;
+  const padLeft = Math.min(cropX, Math.floor(padW / 2));
+  const padTop = Math.min(cropY, Math.floor(padH / 2));
+  cropX -= padLeft;
+  cropY -= padTop;
+  cropW = Math.min(W - cropX, sideMax);
+  cropH = Math.min(H - cropY, sideMax);
 
-Strict rules:
-- Do NOT change any pixel outside the magenta-marked region.
-- Do NOT include any magenta in the output.
-- Do NOT add new objects, text, or watermarks.
-- Keep original resolution, aspect ratio, and image quality.
-- Output ONLY the cleaned image, nothing else.`;
+  const imgSmall = document.createElement("canvas");
+  imgSmall.width = S;
+  imgSmall.height = S;
+  const imgSmallCtx = imgSmall.getContext("2d");
+  imgSmallCtx.imageSmoothingEnabled = true;
+  imgSmallCtx.imageSmoothingQuality = "high";
+  imgSmallCtx.drawImage(els.imgCanvas, cropX, cropY, cropW, cropH, 0, 0, S, S);
+  const smallImgData = imgSmallCtx.getImageData(0, 0, S, S).data;
 
-  const body = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        { inline_data: { mime_type: "image/png", data: originalB64 } },
-        { inline_data: { mime_type: "image/png", data: maskedB64 } }
-      ]
-    }],
-    generationConfig: {
-      responseModalities: ["IMAGE"]
-    }
-  };
+  const maskBig = document.createElement("canvas");
+  maskBig.width = W;
+  maskBig.height = H;
+  const maskBigCtx = maskBig.getContext("2d");
+  const maskBigImg = maskBigCtx.createImageData(W, H);
+  for (let i = 0, j = 0; i < maskU8.length; i++, j += 4) {
+    const v = maskU8[i] > 0 ? 255 : 0;
+    maskBigImg.data[j] = v;
+    maskBigImg.data[j + 1] = v;
+    maskBigImg.data[j + 2] = v;
+    maskBigImg.data[j + 3] = 255;
+  }
+  maskBigCtx.putImageData(maskBigImg, 0, 0);
 
-  const res = await fetch(geminiUrl(key), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
+  const maskSmall = document.createElement("canvas");
+  maskSmall.width = S;
+  maskSmall.height = S;
+  const maskSmallCtx = maskSmall.getContext("2d");
+  maskSmallCtx.imageSmoothingEnabled = false;
+  maskSmallCtx.drawImage(maskBig, cropX, cropY, cropW, cropH, 0, 0, S, S);
+  const smallMaskData = maskSmallCtx.getImageData(0, 0, S, S).data;
 
-  if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try {
-      const errJson = await res.json();
-      if (errJson?.error?.message) msg = errJson.error.message;
-    } catch {}
-    if (res.status === 400 || res.status === 401 || res.status === 403) {
-      localStorage.removeItem(GEMINI_KEY_STORAGE);
-    }
-    throw new Error(msg);
+  const imgArr = new Float32Array(3 * plane);
+  for (let i = 0; i < plane; i++) {
+    imgArr[i]             = smallImgData[i * 4]     / 255;
+    imgArr[plane + i]     = smallImgData[i * 4 + 1] / 255;
+    imgArr[2 * plane + i] = smallImgData[i * 4 + 2] / 255;
   }
 
-  const json = await res.json();
-  const parts = json?.candidates?.[0]?.content?.parts || [];
-  let imgPart = null;
-  for (const p of parts) {
-    if (p.inline_data?.data || p.inlineData?.data) { imgPart = p; break; }
+  const maskArr = new Float32Array(plane);
+  for (let i = 0; i < plane; i++) {
+    maskArr[i] = smallMaskData[i * 4] > 127 ? 1.0 : 0.0;
   }
-  if (!imgPart) {
-    const txt = parts.map(p => p.text).filter(Boolean).join(" ");
-    throw new Error(txt || "Gemini לא החזיר תמונה");
+
+  const imgTensor = new ort.Tensor("float32", imgArr, [1, 3, S, S]);
+  const maskTensor = new ort.Tensor("float32", maskArr, [1, 1, S, S]);
+
+  const inputNames = lamaSession.inputNames;
+  const feeds = {};
+  feeds[inputNames[0]] = imgTensor;
+  feeds[inputNames[1]] = maskTensor;
+
+  const results = await lamaSession.run(feeds);
+  const outKey = lamaSession.outputNames[0];
+  const out = results[outKey];
+  const outArr = out.data;
+
+  const outSmall = document.createElement("canvas");
+  outSmall.width = S;
+  outSmall.height = S;
+  const outSmallCtx = outSmall.getContext("2d");
+  const outSmallImg = outSmallCtx.createImageData(S, S);
+  const osd = outSmallImg.data;
+  let maxV = 0;
+  for (let i = 0; i < outArr.length; i++) {
+    if (outArr[i] > maxV) maxV = outArr[i];
   }
-  const inline = imgPart.inline_data || imgPart.inlineData;
-  const mime = inline.mime_type || inline.mimeType || "image/png";
-  const b64 = inline.data;
+  const scale = maxV <= 1.5 ? 255 : 1;
+  for (let i = 0; i < plane; i++) {
+    osd[i * 4]     = Math.max(0, Math.min(255, outArr[i]             * scale));
+    osd[i * 4 + 1] = Math.max(0, Math.min(255, outArr[plane + i]     * scale));
+    osd[i * 4 + 2] = Math.max(0, Math.min(255, outArr[2 * plane + i] * scale));
+    osd[i * 4 + 3] = 255;
+  }
+  outSmallCtx.putImageData(outSmallImg, 0, 0);
 
-  const img = await loadImageFromDataUrl(`data:${mime};base64,${b64}`);
+  const outFull = document.createElement("canvas");
+  outFull.width = W;
+  outFull.height = H;
+  const outFullCtx = outFull.getContext("2d");
+  outFullCtx.drawImage(els.imgCanvas, 0, 0);
+  outFullCtx.imageSmoothingEnabled = true;
+  outFullCtx.imageSmoothingQuality = "high";
+  outFullCtx.drawImage(outSmall, 0, 0, S, S, cropX, cropY, cropW, cropH);
 
-  const out = document.createElement("canvas");
-  out.width = W;
-  out.height = H;
-  const ocx = out.getContext("2d");
-  ocx.imageSmoothingEnabled = true;
-  ocx.imageSmoothingQuality = "high";
-  ocx.drawImage(img, 0, 0, W, H);
-  return ocx.getImageData(0, 0, W, H);
-}
-
-function loadImageFromDataUrl(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
-  });
+  return outFullCtx.getImageData(0, 0, W, H);
 }
 
 function blendInpainted(originalImageData, inpaintedImageData, alpha, w, h) {
@@ -517,6 +591,10 @@ els.clearMaskBtn.addEventListener("click", () => {
 });
 
 els.removeBtn.addEventListener("click", async () => {
+  if (!lamaSession) {
+    setStatus("טען את מודל ה-AI תחילה", "error");
+    return;
+  }
   if (!currentMask) {
     setStatus("סמן את סימן המים תחילה", "error");
     return;
@@ -541,12 +619,12 @@ els.removeBtn.addEventListener("click", async () => {
   const alpha = featherMask(mask, w, h, featherAmount);
 
   els.removeBtn.disabled = true;
-  showAiOverlay(`שולח ל-Gemini אזור של ${count.toLocaleString()} פיקסלים...`);
+  showAiOverlay(`מעבד אזור של ${count.toLocaleString()} פיקסלים...`);
   setStatus(`AI מעבד<span class="spinner"></span>`, "loading");
   await new Promise(r => setTimeout(r, 50));
 
   try {
-    const inpainted = await inpaintWithGemini(mask);
+    const inpainted = await inpaintWithLama(mask);
     pushImageHistory();
     const original = imgCtx.getImageData(0, 0, w, h);
     blendInpainted(original, inpainted, alpha, w, h);
